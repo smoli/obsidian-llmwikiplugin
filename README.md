@@ -91,6 +91,15 @@ Manage them two ways, both backed by the same file:
 Clicking a button sends its prompt immediately (and *steers* pi if it's already
 running). The file name is configurable in settings.
 
+## Clickable options
+
+When the agent asks you to pick one of several choices — a message ending in a
+question with a numbered list — the list items render as **clickable option
+chips** (numbered, visually distinct from wiki links). Click one to send it as
+your reply instead of typing it; the rest dim out. Paths inside options are shown
+as plain text, not links, so picking an option never gets confused with opening a
+page.
+
 ## Ask about a selection
 
 Select text in any note (edit / live-preview mode), right-click, and choose

@@ -160,6 +160,51 @@ code .pi-page-link {
 	color: var(--link-color);
 }
 
+/* ----- clickable option chips (agent multiple-choice) ----- */
+
+.pi-options {
+	list-style: none;
+	margin: 8px 0;
+	padding-left: 0;
+	counter-reset: pi-opt;
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+.pi-option {
+	position: relative;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	background: var(--background-secondary);
+	padding: 6px 10px;
+	cursor: pointer;
+	transition: background 0.1s ease, border-color 0.1s ease;
+}
+.pi-option::before {
+	counter-increment: pi-opt;
+	content: counter(pi-opt) ". ";
+	font-weight: var(--font-semibold);
+	color: var(--text-accent);
+}
+.pi-option > :first-child {
+	display: inline;
+	margin: 0;
+}
+.pi-option:hover {
+	background: var(--background-modifier-hover);
+	border-color: var(--interactive-accent);
+}
+.pi-option-selected {
+	border-color: var(--interactive-accent);
+	background: var(--background-modifier-hover);
+}
+.pi-options-answered .pi-option {
+	cursor: default;
+}
+.pi-options-answered .pi-option:not(.pi-option-selected) {
+	opacity: 0.5;
+}
+
 /* ----- tool blocks ----- */
 
 .pi-tool {

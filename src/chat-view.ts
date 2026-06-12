@@ -654,9 +654,52 @@ export class PiChatView extends ItemView {
 		});
 	}
 
-	private renderMarkdownInto(el: HTMLElement, markdown: string): void {
+	private renderMarkdownInto(el: HTMLElement, markdown: string, decorate = false): void {
 		el.empty();
-		void MarkdownRenderer.render(this.app, markdown, el, "", this).then(() => this.linkifyPaths(el));
+		void MarkdownRenderer.render(this.app, markdown, el, "", this).then(() => {
+			// Decorate options before linkify so option paths don't become page links.
+			if (decorate) this.decorateOptions(el);
+			this.linkifyPaths(el);
+		});
+	}
+
+	/**
+	 * If an assistant message poses a choice — a trailing question mark plus an
+	 * ordered list of 2+ items — turn those list items into clickable option chips
+	 * (visually distinct from wiki links). Clicking one sends it as the reply.
+	 */
+	private decorateOptions(root: HTMLElement): void {
+		if (!root.closest(".pi-msg-assistant")) return;
+		if (!(root.textContent ?? "").trim().endsWith("?")) return;
+
+		const lists = root.querySelectorAll("ol");
+		if (lists.length === 0) return;
+		const ol = lists[lists.length - 1] as HTMLElement;
+		const items = Array.from(ol.children).filter((c) => c.tagName === "LI") as HTMLElement[];
+		if (items.length < 2) return;
+
+		ol.classList.add("pi-options");
+		for (const li of items) {
+			li.classList.add("pi-option");
+			li.setAttribute("role", "button");
+			li.setAttribute("tabindex", "0");
+			const reply = (li.textContent ?? "").trim();
+			const choose = () => this.chooseOption(ol, li, reply);
+			li.addEventListener("click", choose);
+			li.addEventListener("keydown", (e) => {
+				if (e.key === "Enter" || e.key === " ") {
+					e.preventDefault();
+					choose();
+				}
+			});
+		}
+	}
+
+	private chooseOption(ol: HTMLElement, li: HTMLElement, reply: string): void {
+		if (ol.classList.contains("pi-options-answered")) return;
+		ol.classList.add("pi-options-answered");
+		li.classList.add("pi-option-selected");
+		void this.submitMessage(reply);
 	}
 
 	// ------------------------------------------------- vault page path linking
@@ -674,7 +717,7 @@ export class PiChatView extends ItemView {
 			acceptNode: (node: Node) => {
 				const parent = (node as Text).parentElement;
 				if (!parent) return NodeFilter.FILTER_REJECT;
-				if (parent.closest("pre, a, .pi-page-link")) return NodeFilter.FILTER_REJECT;
+				if (parent.closest("pre, a, .pi-page-link, .pi-option")) return NodeFilter.FILTER_REJECT;
 				if (!node.nodeValue || !/\.(md|markdown)\b/.test(node.nodeValue)) {
 					return NodeFilter.FILTER_REJECT;
 				}
@@ -758,7 +801,7 @@ export class PiChatView extends ItemView {
 
 	private finalizeText(): void {
 		if (this.currentTextEl) {
-			this.renderMarkdownInto(this.currentTextEl, this.currentText);
+			this.renderMarkdownInto(this.currentTextEl, this.currentText, true);
 		}
 		this.currentTextEl = null;
 		this.currentText = "";
