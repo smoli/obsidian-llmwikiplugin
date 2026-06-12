@@ -47,6 +47,8 @@ export interface PiAgentSettings {
 	claudePermissionMode: "bypassPermissions" | "acceptEdits" | "default";
 	/** Model for Claude Code: "default" | "opus" | "sonnet" | "haiku" | explicit id. */
 	claudeModel: string;
+	/** Whether AGENTS.md appends to or replaces Claude Code's system prompt. */
+	claudeAgentsMode: "append" | "replace";
 }
 
 export const DEFAULT_SETTINGS: PiAgentSettings = {
@@ -63,6 +65,7 @@ export const DEFAULT_SETTINGS: PiAgentSettings = {
 	claudePath: "claude",
 	claudePermissionMode: "bypassPermissions",
 	claudeModel: "default",
+	claudeAgentsMode: "append",
 	autoRunEnabled: false,
 	autoRunFolder: "99-raw",
 	autoRunPrompt:
@@ -201,7 +204,7 @@ export class PiAgentSettingTab extends PluginSettingTab {
 		containerEl.createEl("h3", { text: "Claude Code" });
 		containerEl.createEl("p", {
 			text:
-				"Used when the engine is set to Claude Code. Claude reads your vault's AGENTS.md (passed via --system-prompt-file) and operates on files in the working directory.",
+				"Used when the engine is set to Claude Code. Claude reads your vault's AGENTS.md (see AGENTS.md handling below) and operates on files in the working directory.",
 			cls: "setting-item-description",
 		});
 
@@ -228,6 +231,20 @@ export class PiAgentSettingTab extends PluginSettingTab {
 				d.addOption("haiku", "Haiku");
 				d.setValue(this.plugin.settings.claudeModel || "default").onChange(async (v) => {
 					this.plugin.settings.claudeModel = v;
+					await this.plugin.saveSettings();
+				});
+			});
+
+		new Setting(containerEl)
+			.setName("AGENTS.md handling")
+			.setDesc(
+				"Append (recommended): add your AGENTS.md to Claude Code's default prompt, keeping its built-in working-directory grounding so it stays in the vault. Replace: use AGENTS.md as the entire system prompt (can make Claude guess wrong absolute paths)."
+			)
+			.addDropdown((d) => {
+				d.addOption("append", "Append (recommended)");
+				d.addOption("replace", "Replace");
+				d.setValue(this.plugin.settings.claudeAgentsMode).onChange(async (v) => {
+					this.plugin.settings.claudeAgentsMode = v as PiAgentSettings["claudeAgentsMode"];
 					await this.plugin.saveSettings();
 				});
 			});

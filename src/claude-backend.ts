@@ -17,8 +17,10 @@ export interface ClaudeBackendOptions {
 	model?: string;
 	/** acceptEdits | bypassPermissions | default | plan */
 	permissionMode: string;
-	/** Absolute path to AGENTS.md, passed via --system-prompt-file. */
+	/** Absolute path to AGENTS.md. */
 	agentsFile?: string;
+	/** Append AGENTS.md to Claude's default prompt, or replace it entirely. */
+	agentsMode: "append" | "replace";
 	env?: Record<string, string>;
 }
 
@@ -91,11 +93,16 @@ export class ClaudeBackend extends BaseBackend implements AgentBackend {
 			o.permissionMode,
 		];
 		if (this.model && this.model !== "default") args.push("--model", this.model);
-		if (o.agentsFile) args.push("--system-prompt-file", o.agentsFile);
-		// --system-prompt-file replaces Claude Code's default prompt, including its
-		// environment grounding (the real cwd). Re-add that grounding so Claude
-		// stays inside the vault instead of inventing an absolute base path.
-		args.push("--append-system-prompt", this.workspaceGrounding(o.cwd));
+		if (o.agentsFile && o.agentsMode === "replace") {
+			// Replacing Claude Code's prompt removes its environment grounding (the
+			// real cwd), so re-add it — otherwise Claude invents an absolute base path.
+			args.push("--system-prompt-file", o.agentsFile);
+			args.push("--append-system-prompt", this.workspaceGrounding(o.cwd));
+		} else if (o.agentsFile) {
+			// Append: keep Claude Code's default prompt (with its own cwd grounding)
+			// and add the wiki rules on top.
+			args.push("--append-system-prompt-file", o.agentsFile);
+		}
 		if (resume && this.sessionId) args.push("--resume", this.sessionId);
 
 		// .exe can be spawned directly; a bare command / .cmd shim needs a shell on Windows.

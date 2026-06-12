@@ -20,9 +20,10 @@ engine in the panel header (or settings):
   thinking-level control.
 - **Claude Code** — spawned as `claude --print --input-format stream-json
   --output-format stream-json --include-partial-messages`. Your vault's
-  `AGENTS.md` is passed via `--system-prompt-file` (Claude Code natively reads
-  `CLAUDE.md`, so this is how it learns the wiki rules). Permission behavior is
-  configurable (see below).
+  `AGENTS.md` is fed to it (Claude Code natively reads `CLAUDE.md`, so this is how
+  it learns the wiki rules) — by default appended to Claude's own prompt so its
+  built-in working-directory grounding is preserved, or optionally replacing it
+  (see *AGENTS.md handling* in settings). Permission behavior is configurable too.
 
 Both engines are adapted to one normalized event stream, so the panel — streaming
 text, collapsible tool calls, clickable page links, quick prompts, error

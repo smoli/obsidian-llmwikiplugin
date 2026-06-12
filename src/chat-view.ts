@@ -197,6 +197,7 @@ export class PiChatView extends ItemView {
 				model: s.claudeModel || "default",
 				permissionMode: s.claudePermissionMode,
 				agentsFile: this.plugin.getAgentsFile() ?? undefined,
+				agentsMode: s.claudeAgentsMode,
 			});
 		} else {
 			this.backend = new PiBackend({
