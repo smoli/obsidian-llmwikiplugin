@@ -1,0 +1,14 @@
+# build / deps
+node_modules/
+main.js
+*.js.map
+
+# os / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# logs
+*.log
+npm-debug.log*
