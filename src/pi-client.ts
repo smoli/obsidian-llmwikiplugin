@@ -27,6 +27,8 @@ export interface PiClientOptions {
 	persistSession: boolean;
 	/** File whose contents are appended to the system prompt (persona). */
 	appendSystemPromptFile?: string;
+	/** Existing session id/file to resume (for switching sessions). */
+	resumeSessionId?: string;
 	/** Extra environment variables merged over process.env. */
 	env?: Record<string, string>;
 }
@@ -64,7 +66,8 @@ export class PiClient extends EventEmitter {
 		if (this.proc) return;
 
 		const args = ["--mode", "rpc"];
-		if (!this.opts.persistSession) args.push("--no-session");
+		if (this.opts.resumeSessionId) args.push("--session", this.opts.resumeSessionId);
+		else if (!this.opts.persistSession) args.push("--no-session");
 		if (this.opts.provider) args.push("--provider", this.opts.provider);
 		if (this.opts.model) args.push("--model", this.opts.model);
 		if (this.opts.thinking) args.push("--thinking", this.opts.thinking);

@@ -21,6 +21,8 @@ export interface ClaudeBackendOptions {
 	agentsFile?: string;
 	/** Append AGENTS.md to Claude's default prompt, or replace it entirely. */
 	agentsMode: "append" | "replace";
+	/** Existing session_id to resume on startup (for switching sessions). */
+	resumeSessionId?: string;
 	env?: Record<string, string>;
 }
 
@@ -58,6 +60,11 @@ export class ClaudeBackend extends BaseBackend implements AgentBackend {
 	constructor(private opts: ClaudeBackendOptions) {
 		super();
 		this.model = opts.model ?? "default";
+		this.sessionId = opts.resumeSessionId;
+	}
+
+	async getEngineSessionId(): Promise<string | undefined> {
+		return this.sessionId;
 	}
 
 	get running(): boolean {
@@ -68,7 +75,8 @@ export class ClaudeBackend extends BaseBackend implements AgentBackend {
 	}
 
 	start(): void {
-		this.spawnProcess(false);
+		// Resume an existing session when one was provided (session switching).
+		this.spawnProcess(!!this.sessionId);
 	}
 
 	dispose(): void {

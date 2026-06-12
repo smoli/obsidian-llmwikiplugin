@@ -16,6 +16,7 @@ import { AgentBackend, BackendEvent, BackendModel, NormalizedStats, PermissionRe
 import { PiBackend } from "./pi-backend";
 import { ClaudeBackend } from "./claude-backend";
 import { ExtensionUIRequest, ThinkingLevel } from "./rpc-types";
+import { SavedSession, newSessionId } from "./sessions";
 import { showUIDialog } from "./ui-dialog";
 
 export const PI_VIEW_TYPE = "pi-agent-chat";
@@ -58,8 +59,9 @@ export class PiChatView extends ItemView {
 	// prepended to the next message.
 	private pendingContext: { pagePath: string; selection?: string } | null = null;
 
-	// Plain conversation record (user + assistant text only) for saving to Markdown.
-	private transcript: { role: "user" | "assistant"; text: string }[] = [];
+	// The active session; its transcript is the live conversation record (user +
+	// assistant text only, used for saving and for restoring on session switch).
+	private session!: SavedSession;
 	// Where this conversation was first saved, so re-saving updates the same file.
 	private savedChatPath: string | null = null;
 	private savedChatStamp: { date: string; time: string } | null = null;
@@ -83,6 +85,7 @@ export class PiChatView extends ItemView {
 	async onOpen(): Promise<void> {
 		this.contentEl.empty();
 		this.contentEl.addClass("pi-agent-view");
+		this.session = this.makeSession();
 		this.buildHeader();
 		this.transcriptEl = this.contentEl.createDiv({ cls: "pi-transcript" });
 		this.quickBarEl = this.contentEl.createDiv({ cls: "pi-quickbar" });
@@ -94,6 +97,7 @@ export class PiChatView extends ItemView {
 	}
 
 	async onClose(): Promise<void> {
+		void this.plugin.sessionStore.flush();
 		this.teardownBackend();
 	}
 
@@ -128,6 +132,10 @@ export class PiChatView extends ItemView {
 		const spacer = header.createDiv({ cls: "pi-header-spacer" });
 		spacer.style.flex = "1";
 
+		const sessionsBtn = header.createEl("button", { cls: "pi-icon-btn", attr: { "aria-label": "Sessions" } });
+		setIcon(sessionsBtn, "history");
+		sessionsBtn.addEventListener("click", (e) => this.openSessionMenu(e));
+
 		const newBtn = header.createEl("button", { cls: "pi-icon-btn", attr: { "aria-label": "New session" } });
 		setIcon(newBtn, "plus");
 		newBtn.addEventListener("click", () => this.startNewSession());
@@ -154,9 +162,8 @@ export class PiChatView extends ItemView {
 		const engine = this.engineSelect.value as "pi" | "claude";
 		this.plugin.settings.engine = engine;
 		await this.plugin.saveSettings();
-		this.teardownBackend();
-		this.resetTranscript();
-		await this.connect();
+		// Engine session ids aren't portable across engines, so start a new session.
+		await this.startFreshSession();
 	}
 
 	/** Populate the persona dropdown from vault-root persona files. */
@@ -176,9 +183,8 @@ export class PiChatView extends ItemView {
 	private async onPersonaChange(): Promise<void> {
 		this.plugin.settings.selectedPersona = this.personaSelect.value;
 		await this.plugin.saveSettings();
-		this.teardownBackend();
-		this.resetTranscript();
-		await this.connect();
+		// A different system prompt means a new conversation.
+		await this.startFreshSession();
 		const name = this.personaSelect.selectedOptions[0]?.text ?? "Default";
 		this.setStatus(`Persona: ${name}`);
 	}
@@ -187,7 +193,7 @@ export class PiChatView extends ItemView {
 
 	/** Save the conversation (user + assistant text, no tool calls) as Markdown. */
 	private async saveChat(): Promise<void> {
-		if (this.transcript.length === 0) {
+		if (this.session.transcript.length === 0) {
 			new Notice("No conversation to save yet.");
 			return;
 		}
@@ -242,7 +248,7 @@ export class PiChatView extends ItemView {
 			this.savedChatPath = null; // file was moved/deleted — make a fresh one
 		}
 
-		const firstUser = this.transcript.find((t) => t.role === "user")?.text ?? "Chat";
+		const firstUser = this.session.transcript.find((t) => t.role === "user")?.text ?? "Chat";
 		const base = `${date} ${time.replace(":", "")} ${this.fileSlug(firstUser)}`.trim();
 		const dir = folder ? folder + "/" : "";
 		let name = `${base}.md`;
@@ -262,7 +268,7 @@ export class PiChatView extends ItemView {
 	private buildTranscriptMarkdown(): string {
 		const parts: string[] = [];
 		let lastRole = "";
-		for (const m of this.transcript) {
+		for (const m of this.session.transcript) {
 			const text = m.text.trim();
 			if (!text) continue;
 			if (m.role === lastRole) {
@@ -482,6 +488,9 @@ export class PiChatView extends ItemView {
 
 		// A selected persona replaces AGENTS.md as the system prompt for this session.
 		const personaFile = this.plugin.resolvePersonaPromptFile();
+		this.session.engine = engine;
+		this.session.persona = s.selectedPersona;
+		const resumeSessionId = this.session.engineSessionId;
 
 		if (engine === "claude") {
 			this.backend = new ClaudeBackend({
@@ -491,6 +500,7 @@ export class PiChatView extends ItemView {
 				permissionMode: s.claudePermissionMode,
 				agentsFile: personaFile ?? this.plugin.getAgentsFile() ?? undefined,
 				agentsMode: s.claudeAgentsMode,
+				resumeSessionId,
 			});
 		} else {
 			this.backend = new PiBackend({
@@ -501,6 +511,7 @@ export class PiChatView extends ItemView {
 				thinking: s.thinking,
 				persistSession: s.persistSession,
 				appendSystemPromptFile: personaFile ?? undefined,
+				resumeSessionId,
 			});
 		}
 
@@ -532,15 +543,6 @@ export class PiChatView extends ItemView {
 		this.setStatus(`Connected · ${engine} · cwd: ${cwd}`);
 		await this.loadModels();
 		await this.refreshStats();
-	}
-
-	/** Clear the transcript DOM and the saved-conversation record. */
-	private resetTranscript(): void {
-		this.transcriptEl.empty();
-		this.transcript = [];
-		this.workingEl = null;
-		this.savedChatPath = null;
-		this.savedChatStamp = null;
 	}
 
 	private teardownBackend(): void {
@@ -632,17 +634,131 @@ export class PiChatView extends ItemView {
 	}
 
 	private async startNewSession(): Promise<void> {
-		if (!this.backend?.running) {
-			this.teardownBackend();
-			this.resetTranscript();
-			await this.connect();
-			return;
+		await this.startFreshSession();
+	}
+
+	// --------------------------------------------------------------- sessions
+
+	private makeSession(): SavedSession {
+		const now = Date.now();
+		return {
+			id: newSessionId(),
+			name: "",
+			engine: this.plugin.settings.engine,
+			engineSessionId: undefined,
+			model: "",
+			persona: this.plugin.settings.selectedPersona,
+			transcript: [],
+			createdAt: now,
+			updatedAt: now,
+		};
+	}
+
+	/** Start a brand-new session. The previous one is already persisted (if it had
+	 * messages), so nothing is lost. */
+	private async startFreshSession(): Promise<void> {
+		this.session = this.makeSession();
+		this.clearConversationDom();
+		this.teardownBackend();
+		await this.connect();
+		this.setStatus("New session.");
+	}
+
+	private async switchSession(id: string): Promise<void> {
+		const target = this.plugin.sessionStore.get(id);
+		if (!target || target.id === this.session.id) return;
+
+		this.session = target;
+		// Align engine + persona so the engine can resume the right conversation.
+		this.plugin.settings.engine = target.engine;
+		this.plugin.settings.selectedPersona = target.persona;
+		await this.plugin.saveSettings();
+		this.engineSelect.value = target.engine;
+
+		this.clearConversationDom();
+		this.renderTranscriptFromSession();
+		this.teardownBackend();
+		await this.connect();
+		this.setStatus(`Session: ${target.name || "Untitled"}`);
+	}
+
+	private openSessionMenu(evt: MouseEvent): void {
+		const menu = new Menu();
+		menu.addItem((i) => i.setTitle("New session").setIcon("plus").onClick(() => void this.startFreshSession()));
+
+		const sessions = this.plugin.sessionStore.getAll();
+		if (sessions.length) {
+			menu.addSeparator();
+			for (const s of sessions.slice(0, 25)) {
+				menu.addItem((i) => {
+					i.setTitle(s.name || "Untitled").onClick(() => void this.switchSession(s.id));
+					if (s.id === this.session.id) i.setChecked(true);
+				});
+			}
 		}
-		await this.backend.newSession();
-		this.resetTranscript();
+
+		menu.addSeparator();
+		menu.addItem((i) => i.setTitle("Rename current…").setIcon("pencil").onClick(() => void this.renameCurrentSession()));
+		menu.addItem((i) => i.setTitle("Delete current").setIcon("trash").onClick(() => void this.deleteCurrentSession()));
+		menu.showAtMouseEvent(evt);
+	}
+
+	private async renameCurrentSession(): Promise<void> {
+		const req: ExtensionUIRequest = {
+			type: "extension_ui_request",
+			id: "rename-session",
+			method: "input",
+			title: "Rename session",
+			prefill: this.session.name,
+		};
+		const answer = await showUIDialog(this.app, req);
+		if (answer.cancelled) return;
+		const name = (typeof answer.value === "string" && answer.value.trim()) || this.session.name;
+		this.session.name = name;
+		this.session.updatedAt = Date.now();
+		if (this.session.transcript.length) this.plugin.sessionStore.upsert(this.session);
+		this.setStatus(`Renamed: ${name}`);
+	}
+
+	private async deleteCurrentSession(): Promise<void> {
+		this.plugin.sessionStore.remove(this.session.id);
+		await this.startFreshSession();
+		this.setStatus("Session deleted.");
+	}
+
+	private clearConversationDom(): void {
+		this.transcriptEl.empty();
+		this.workingEl = null;
+		this.savedChatPath = null;
+		this.savedChatStamp = null;
 		this.resetStreamState();
-		this.setStatus("Started a new session.");
-		await this.refreshStats();
+	}
+
+	private renderTranscriptFromSession(): void {
+		for (const m of this.session.transcript) {
+			if (m.role === "user") this.renderUserBlock(m.text);
+			else this.renderAssistantBlock(m.text);
+		}
+	}
+
+	/** Persist the current session after its transcript changed; name it lazily. */
+	private afterTranscriptChange(): void {
+		if (this.session.transcript.length === 0) return;
+		if (!this.session.name) {
+			const first = this.session.transcript.find((t) => t.role === "user")?.text ?? "New chat";
+			this.session.name = first.split("\n").map((l) => l.trim()).filter(Boolean)[0]?.slice(0, 60) || "New chat";
+		}
+		this.session.model = this.modelSelect.selectedOptions[0]?.text || this.session.model;
+		this.session.updatedAt = Date.now();
+		this.plugin.sessionStore.upsert(this.session);
+	}
+
+	private async captureSessionId(): Promise<void> {
+		const sid = await this.backend?.getEngineSessionId();
+		if (sid && sid !== this.session.engineSessionId) {
+			this.session.engineSessionId = sid;
+			if (this.session.transcript.length) this.plugin.sessionStore.upsert(this.session);
+		}
 	}
 
 	private async loadModels(): Promise<void> {
@@ -781,6 +897,7 @@ export class PiChatView extends ItemView {
 				this.finalizeThinking();
 				this.refreshSendState();
 				void this.refreshStats();
+				void this.captureSessionId();
 				break;
 
 			case "error":
@@ -873,11 +990,23 @@ export class PiChatView extends ItemView {
 	}
 
 	private appendUserMessage(text: string): void {
-		this.transcript.push({ role: "user", text });
+		this.session.transcript.push({ role: "user", text });
+		this.renderUserBlock(text);
+		this.afterTranscriptChange();
+	}
+
+	private renderUserBlock(text: string): void {
 		const block = this.appendBlock("pi-msg pi-msg-user");
 		const body = block.createDiv({ cls: "pi-msg-body" });
 		this.renderMarkdownInto(body, text);
 		this.scrollToBottom(true);
+	}
+
+	private renderAssistantBlock(text: string): void {
+		const block = this.appendBlock("pi-msg pi-msg-assistant");
+		const body = block.createDiv({ cls: "pi-msg-body" });
+		this.renderMarkdownInto(body, text, true);
+		this.scrollToBottom();
 	}
 
 	private newAssistantTextBlock(): HTMLElement {
@@ -1148,7 +1277,10 @@ export class PiChatView extends ItemView {
 	private finalizeText(): void {
 		if (this.currentTextEl) {
 			this.renderMarkdownInto(this.currentTextEl, this.currentText, true);
-			if (this.currentText.trim()) this.transcript.push({ role: "assistant", text: this.currentText });
+			if (this.currentText.trim()) {
+				this.session.transcript.push({ role: "assistant", text: this.currentText });
+				this.afterTranscriptChange();
+			}
 		}
 		this.currentTextEl = null;
 		this.currentText = "";

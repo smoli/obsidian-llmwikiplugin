@@ -2,6 +2,7 @@ import { Editor, FileSystemAdapter, MarkdownFileInfo, Menu, Notice, Plugin, TAbs
 import { PI_VIEW_TYPE, PiChatView } from "./chat-view";
 import { DEFAULT_SETTINGS, PiAgentSettingTab, PiAgentSettings } from "./settings";
 import { PromptStore } from "./prompts";
+import { SessionStore } from "./sessions";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
@@ -14,6 +15,7 @@ export interface Persona {
 export default class PiAgentPlugin extends Plugin {
 	declare settings: PiAgentSettings;
 	promptStore!: PromptStore;
+	sessionStore!: SessionStore;
 
 	// Auto-run batching: paths created in the watch folder, plus a debounce timer.
 	private pendingAutoRun = new Set<string>();
@@ -24,6 +26,10 @@ export default class PiAgentPlugin extends Plugin {
 
 		this.promptStore = new PromptStore(this.app, () => this.settings.promptsFile);
 		await this.promptStore.load();
+
+		const pluginDir = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
+		this.sessionStore = new SessionStore(this.app, pluginDir);
+		await this.sessionStore.load();
 
 		// Live-reload standard prompts when the JSON file is edited in the vault.
 		this.registerEvent(

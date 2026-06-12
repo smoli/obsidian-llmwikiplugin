@@ -82,6 +82,9 @@ export interface AgentBackend extends EventEmitter {
 	setThinking(level: ThinkingLevel): Promise<void>;
 	getStats(): Promise<NormalizedStats | null>;
 
+	/** The engine's session identifier (claude session_id / pi session id) for resuming. */
+	getEngineSessionId(): Promise<string | undefined>;
+
 	/** Answer a pi extension UI dialog. */
 	respondDialog(payload: Record<string, unknown>): void;
 	/** Answer a Claude permission request. */
@@ -114,6 +117,10 @@ export abstract class BaseBackend extends EventEmitter implements AgentBackend {
 	abstract setModel(key: string): Promise<PromptResult>;
 	abstract setThinking(level: ThinkingLevel): Promise<void>;
 	abstract getStats(): Promise<NormalizedStats | null>;
+
+	async getEngineSessionId(): Promise<string | undefined> {
+		return undefined;
+	}
 
 	respondDialog(_payload: Record<string, unknown>): void {
 		/* default no-op */

@@ -65,6 +65,15 @@ export class PiBackend extends BaseBackend implements AgentBackend {
 		}));
 	}
 
+	async getEngineSessionId(): Promise<string | undefined> {
+		try {
+			const state = await this.client.getState();
+			return (state.data?.sessionId as string | undefined) ?? undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
 	async getActiveModelKey(): Promise<string | undefined> {
 		try {
 			const state = await this.client.getState();
