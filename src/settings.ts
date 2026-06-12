@@ -32,6 +32,14 @@ export interface PiAgentSettings {
 	/** Name of the JSON file (at the vault root) holding standard prompts. */
 	promptsFile: string;
 
+	// --- Automation: run a prompt when files land in a watched folder ---
+	/** Enable auto-running a prompt when new files appear in the watch folder. */
+	autoRunEnabled: boolean;
+	/** Vault-relative folder to watch for new files (e.g. "99-raw"). */
+	autoRunFolder: string;
+	/** Prompt to run; supports {{files}} (newline list) and {{count}} placeholders. */
+	autoRunPrompt: string;
+
 	// --- Claude Code engine ---
 	/** Command or absolute path used to launch the Claude Code CLI. */
 	claudePath: string;
@@ -55,6 +63,10 @@ export const DEFAULT_SETTINGS: PiAgentSettings = {
 	claudePath: "claude",
 	claudePermissionMode: "bypassPermissions",
 	claudeModel: "default",
+	autoRunEnabled: false,
+	autoRunFolder: "99-raw",
+	autoRunPrompt:
+		"New source file(s) were added to the raw folder:\n{{files}}\n\nIngest them following the workflow in AGENTS.md.",
 };
 
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
@@ -231,6 +243,52 @@ export class PiAgentSettingTab extends PluginSettingTab {
 				d.addOption("default", "Ask me per tool");
 				d.setValue(this.plugin.settings.claudePermissionMode).onChange(async (v) => {
 					this.plugin.settings.claudePermissionMode = v as PiAgentSettings["claudePermissionMode"];
+					await this.plugin.saveSettings();
+				});
+			});
+
+		// ----- automation -----
+		containerEl.createEl("h3", { text: "Automation" });
+		containerEl.createEl("p", {
+			text:
+				"Automatically run a prompt when new files are added to a watched folder (e.g. dropping a source document into the raw folder).",
+			cls: "setting-item-description",
+		});
+
+		new Setting(containerEl)
+			.setName("Run on new file in folder")
+			.setDesc("When enabled, adding files to the watch folder opens the panel and runs the prompt below.")
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.autoRunEnabled).onChange(async (v) => {
+					this.plugin.settings.autoRunEnabled = v;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Watch folder")
+			.setDesc("Vault-relative folder to watch for new files.")
+			.addText((t) =>
+				t
+					.setPlaceholder("99-raw")
+					.setValue(this.plugin.settings.autoRunFolder)
+					.onChange(async (v) => {
+						this.plugin.settings.autoRunFolder = v.trim().replace(/^[\\/]+|[\\/]+$/g, "");
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Prompt")
+			.setDesc("Prompt sent to the agent. Use {{files}} for the list of new files and {{count}} for how many.")
+			.then((s) => {
+				const ta = s.controlEl.createEl("textarea", {
+					cls: "pi-prompt-text",
+					attr: { rows: "4" },
+				});
+				ta.value = this.plugin.settings.autoRunPrompt;
+				ta.addEventListener("change", async () => {
+					this.plugin.settings.autoRunPrompt = ta.value;
 					await this.plugin.saveSettings();
 				});
 			});

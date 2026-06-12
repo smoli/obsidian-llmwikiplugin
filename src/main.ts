@@ -1,4 +1,4 @@
-import { FileSystemAdapter, Plugin, TAbstractFile, WorkspaceLeaf } from "obsidian";
+import { FileSystemAdapter, Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import { PI_VIEW_TYPE, PiChatView } from "./chat-view";
 import { DEFAULT_SETTINGS, PiAgentSettingTab, PiAgentSettings } from "./settings";
 import { PromptStore } from "./prompts";
@@ -8,6 +8,10 @@ import * as fs from "fs";
 export default class PiAgentPlugin extends Plugin {
 	declare settings: PiAgentSettings;
 	promptStore!: PromptStore;
+
+	// Auto-run batching: paths created in the watch folder, plus a debounce timer.
+	private pendingAutoRun = new Set<string>();
+	private autoRunTimer: number | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -44,10 +48,64 @@ export default class PiAgentPlugin extends Plugin {
 		});
 
 		this.addSettingTab(new PiAgentSettingTab(this.app, this));
+
+		// Register the folder watcher only after layout is ready. Obsidian replays
+		// a "create" event for every existing file during startup; waiting for
+		// layout-ready skips that initial flood so we only react to genuinely new files.
+		this.app.workspace.onLayoutReady(() => {
+			this.registerEvent(this.app.vault.on("create", (file) => this.onVaultCreate(file)));
+		});
 	}
 
 	onunload(): void {
-		// Views are detached by Obsidian; PiChatView.onClose disposes its client.
+		if (this.autoRunTimer != null) {
+			window.clearTimeout(this.autoRunTimer);
+			this.autoRunTimer = null;
+		}
+		// Views are detached by Obsidian; PiChatView.onClose disposes its backend.
+	}
+
+	// ----------------------------------------------------- folder-watch auto-run
+
+	private onVaultCreate(file: TAbstractFile): void {
+		if (!this.settings.autoRunEnabled) return;
+		if (!(file instanceof TFile)) return;
+
+		const folder = this.settings.autoRunFolder.replace(/^[\\/]+|[\\/]+$/g, "");
+		if (!folder) return;
+
+		const p = file.path; // vault-relative, forward slashes
+		if (p !== folder && !p.startsWith(folder + "/")) return;
+
+		this.pendingAutoRun.add(this.toAgentPath(p));
+		if (this.autoRunTimer != null) window.clearTimeout(this.autoRunTimer);
+		this.autoRunTimer = window.setTimeout(() => {
+			this.autoRunTimer = null;
+			void this.dispatchAutoRun();
+		}, 1500);
+	}
+
+	private async dispatchAutoRun(): Promise<void> {
+		const files = [...this.pendingAutoRun];
+		this.pendingAutoRun.clear();
+		if (files.length === 0) return;
+
+		const list = files.map((f) => `- ${f}`).join("\n");
+		const prompt = (this.settings.autoRunPrompt || DEFAULT_SETTINGS.autoRunPrompt)
+			.replace(/\{\{files\}\}/g, list)
+			.replace(/\{\{count\}\}/g, String(files.length));
+
+		const leaf = await this.activateView();
+		if (leaf?.view instanceof PiChatView) {
+			await leaf.view.runPrompt(prompt);
+		}
+	}
+
+	/** Convert a vault-relative path to one relative to the agent's working dir. */
+	private toAgentPath(vaultPath: string): string {
+		const sub = this.settings.workingDir.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+		if (sub && vaultPath.startsWith(sub + "/")) return vaultPath.slice(sub.length + 1);
+		return vaultPath;
 	}
 
 	async activateView(): Promise<WorkspaceLeaf | null> {

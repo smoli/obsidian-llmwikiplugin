@@ -251,6 +251,18 @@ export class PiChatView extends ItemView {
 		await this.startNewSession();
 	}
 
+	/**
+	 * Programmatically run a prompt (used by folder-watch automation). Ensures the
+	 * backend is connected, waits briefly for it to come up, then submits.
+	 */
+	async runPrompt(text: string): Promise<void> {
+		if (!this.backend) await this.connect();
+		for (let i = 0; i < 50 && !this.backend?.running; i++) {
+			await new Promise((r) => window.setTimeout(r, 200));
+		}
+		await this.submitMessage(text);
+	}
+
 	private async startNewSession(): Promise<void> {
 		if (!this.backend?.running) {
 			this.teardownBackend();

@@ -90,6 +90,22 @@ Manage them two ways, both backed by the same file:
 Clicking a button sends its prompt immediately (and *steers* pi if it's already
 running). The file name is configurable in settings.
 
+## Automation: run on new file
+
+The plugin can watch a folder and automatically run a prompt whenever a new file
+lands in it — e.g. drop a PDF into your raw folder and have the agent ingest it.
+
+Enable it under **Settings → Pi Agent → Automation**:
+
+- **Run on new file in folder** — master toggle (off by default).
+- **Watch folder** — vault-relative folder to watch (default `99-raw`).
+- **Prompt** — what to send. `{{files}}` expands to the list of new files and
+  `{{count}}` to how many.
+
+When files are added, the panel opens (if needed), connects, and runs the prompt.
+Multiple files dropped together are debounced into a single run. Files already in
+the vault at startup do **not** trigger it — only genuinely new ones.
+
 ## Settings
 
 | Setting | Description |
@@ -103,6 +119,7 @@ running). The file name is configurable in settings.
 | Show thinking | Display the agent's reasoning blocks. |
 | Tool permission dialogs | Ask / always allow / always block confirmation prompts pi raises (and Claude's permission asks). |
 | Prompts file | Vault-root JSON file holding the one-click standard prompts. |
+| Run on new file / Watch folder / Prompt | Auto-run a prompt when files appear in a watched folder (see Automation above). |
 | Claude command | Command/path to the Claude Code CLI (default `claude`). |
 | Claude model | `default` / Opus / Sonnet / Haiku. |
 | Permissions (Claude) | **Bypass all** (edits + bash/git, no prompts — needed for the full wiki workflow), **Auto-accept edits only** (edits auto-approved, bash restricted), or **Ask me per tool** (prompts in the panel). |
