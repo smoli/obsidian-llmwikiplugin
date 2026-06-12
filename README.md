@@ -90,6 +90,16 @@ Manage them two ways, both backed by the same file:
 Clicking a button sends its prompt immediately (and *steers* pi if it's already
 running). The file name is configurable in settings.
 
+## Ask about a selection
+
+Select text in any note (edit / live-preview mode), right-click, and choose
+**"Ask <engine> about selection"** (the label reflects your selected engine —
+"Ask pi…" or "Ask Claude Code…"; also available as the command *Ask the agent
+about selection*). This opens a fresh chat session seeded with the selected text
+and the page it came from, and leaves the cursor in the input so you can type
+your question. The agent still has full vault access, so it can pull in anything
+else it needs to answer.
+
 ## Automation: run on new file
 
 The plugin can watch a folder and automatically run a prompt whenever a new file

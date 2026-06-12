@@ -1,4 +1,4 @@
-import { FileSystemAdapter, Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
+import { Editor, FileSystemAdapter, MarkdownFileInfo, Menu, Notice, Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import { PI_VIEW_TYPE, PiChatView } from "./chat-view";
 import { DEFAULT_SETTINGS, PiAgentSettingTab, PiAgentSettings } from "./settings";
 import { PromptStore } from "./prompts";
@@ -46,6 +46,34 @@ export default class PiAgentPlugin extends Plugin {
 				}
 			},
 		});
+
+		this.addCommand({
+			id: "pi-agent-ask-about-selection",
+			name: "Ask the agent about selection",
+			editorCallback: (editor: Editor, info: MarkdownFileInfo) => {
+				const selection = editor.getSelection();
+				if (!selection || !selection.trim()) {
+					new Notice("Select some text first.");
+					return;
+				}
+				void this.askAboutSelection(info.file ?? null, selection);
+			},
+		});
+
+		// Right-click context menu entry when text is selected in a note. The label
+		// reflects the currently selected engine (pi / Claude Code).
+		this.registerEvent(
+			this.app.workspace.on("editor-menu", (menu: Menu, editor: Editor, info: MarkdownFileInfo) => {
+				const selection = editor.getSelection();
+				if (!selection || !selection.trim()) return;
+				menu.addItem((item) =>
+					item
+						.setTitle(`Ask ${this.engineLabel()} about selection`)
+						.setIcon("bot")
+						.onClick(() => this.askAboutSelection(info.file ?? null, selection))
+				);
+			})
+		);
 
 		this.addSettingTab(new PiAgentSettingTab(this.app, this));
 
@@ -119,6 +147,20 @@ export default class PiAgentPlugin extends Plugin {
 		}
 		if (leaf) workspace.revealLeaf(leaf);
 		return leaf;
+	}
+
+	/** Display name for the currently selected engine. */
+	engineLabel(): string {
+		return this.settings.engine === "claude" ? "Claude Code" : "pi";
+	}
+
+	/** Open the panel and seed a fresh session with a page selection to ask about. */
+	private async askAboutSelection(file: TFile | null, selection: string): Promise<void> {
+		const pagePath = file ? this.toAgentPath(file.path) : "(unknown page)";
+		const leaf = await this.activateView();
+		if (leaf?.view instanceof PiChatView) {
+			await leaf.view.seedFromSelection(pagePath, selection);
+		}
 	}
 
 	/**

@@ -173,6 +173,7 @@ export class PiChatView extends ItemView {
 	// ------------------------------------------------------------- lifecycle
 
 	private async connect(): Promise<void> {
+		if (this.backend) return;
 		const cwd = this.plugin.getWorkingDir();
 		if (!cwd) {
 			this.setStatus("Cannot resolve vault path — a local vault is required.", true);
@@ -255,12 +256,42 @@ export class PiChatView extends ItemView {
 	 * Programmatically run a prompt (used by folder-watch automation). Ensures the
 	 * backend is connected, waits briefly for it to come up, then submits.
 	 */
-	async runPrompt(text: string): Promise<void> {
+	private async ensureRunning(): Promise<void> {
 		if (!this.backend) await this.connect();
 		for (let i = 0; i < 50 && !this.backend?.running; i++) {
 			await new Promise((r) => window.setTimeout(r, 200));
 		}
+	}
+
+	async runPrompt(text: string): Promise<void> {
+		await this.ensureRunning();
 		await this.submitMessage(text);
+	}
+
+	/**
+	 * Open a fresh session seeded with a page selection, then leave the cursor in
+	 * the input so the user can type their question. The agent still has full
+	 * vault access (it runs in the vault root).
+	 */
+	async seedFromSelection(pagePath: string, selection: string): Promise<void> {
+		await this.ensureRunning();
+		// Only reset if there's already a conversation; a just-opened panel is fresh.
+		if (this.transcriptEl.childElementCount > 0) {
+			await this.startNewSession();
+		}
+		const quoted = selection
+			.replace(/\r\n/g, "\n")
+			.trimEnd()
+			.split("\n")
+			.map((l) => `> ${l}`)
+			.join("\n");
+		const block = `Regarding \`${pagePath}\`, this selection:\n\n${quoted}\n\n`;
+		this.inputEl.value = block;
+		this.inputEl.focus();
+		const end = this.inputEl.value.length;
+		this.inputEl.setSelectionRange(end, end);
+		this.inputEl.scrollTop = this.inputEl.scrollHeight;
+		this.setStatus(`Loaded selection from ${pagePath} — type your question and send.`);
 	}
 
 	private async startNewSession(): Promise<void> {
