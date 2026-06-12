@@ -258,6 +258,73 @@ code .pi-page-link {
 	background: var(--interactive-hover);
 }
 
+/* ----- attached selection context ----- */
+
+.pi-context {
+	margin: 8px 8px 0 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-left: 3px solid var(--interactive-accent);
+	border-radius: var(--radius-m);
+	background: var(--background-secondary);
+	overflow: hidden;
+}
+.pi-context-head {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 4px 6px 4px 8px;
+	font-size: var(--font-ui-smaller);
+}
+.pi-context-icon {
+	display: inline-flex;
+	color: var(--text-muted);
+}
+.pi-context-icon svg {
+	width: 14px;
+	height: 14px;
+}
+.pi-context-path {
+	flex: 1;
+	min-width: 0;
+	color: var(--link-color);
+	font-family: var(--font-monospace);
+	cursor: pointer;
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.pi-context-path:hover {
+	text-decoration: underline;
+}
+.pi-context-clear {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	padding: 2px;
+	background: transparent;
+	border: none;
+	color: var(--text-muted);
+	cursor: pointer;
+	border-radius: var(--radius-s);
+}
+.pi-context-clear:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+.pi-context-clear svg {
+	width: 14px;
+	height: 14px;
+}
+.pi-context-body {
+	padding: 6px 8px;
+	max-height: 120px;
+	overflow-y: auto;
+	white-space: pre-wrap;
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	border-top: 1px solid var(--background-modifier-border);
+}
+
 /* ----- input ----- */
 
 .pi-input-row {

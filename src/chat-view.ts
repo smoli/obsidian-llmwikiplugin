@@ -32,6 +32,7 @@ export class PiChatView extends ItemView {
 	private transcriptEl!: HTMLElement;
 	private inputEl!: HTMLTextAreaElement;
 	private quickBarEl!: HTMLElement;
+	private contextEl!: HTMLElement;
 	private sendBtn!: HTMLButtonElement;
 	private stopBtn!: HTMLButtonElement;
 	private statusEl!: HTMLElement;
@@ -47,6 +48,9 @@ export class PiChatView extends ItemView {
 	private toolBlocks = new Map<string, ToolBlock>();
 	private rafPending = false;
 	private streaming = false;
+
+	// Selection attached via "ask about selection", prepended to the next message.
+	private pendingContext: { pagePath: string; selection: string } | null = null;
 
 	constructor(leaf: WorkspaceLeaf, private plugin: PiAgentPlugin) {
 		super(leaf);
@@ -71,6 +75,8 @@ export class PiChatView extends ItemView {
 		this.transcriptEl = this.contentEl.createDiv({ cls: "pi-transcript" });
 		this.quickBarEl = this.contentEl.createDiv({ cls: "pi-quickbar" });
 		this.renderQuickPrompts();
+		this.contextEl = this.contentEl.createDiv({ cls: "pi-context" });
+		this.contextEl.hide();
 		this.buildInput();
 		await this.connect();
 	}
@@ -269,9 +275,9 @@ export class PiChatView extends ItemView {
 	}
 
 	/**
-	 * Open a fresh session seeded with a page selection, then leave the cursor in
-	 * the input so the user can type their question. The agent still has full
-	 * vault access (it runs in the vault root).
+	 * Open a fresh session and attach a page selection as immutable context shown
+	 * above the input. The context is prepended to the user's next message. The
+	 * agent still has full vault access (it runs in the vault root).
 	 */
 	async seedFromSelection(pagePath: string, selection: string): Promise<void> {
 		await this.ensureRunning();
@@ -279,19 +285,37 @@ export class PiChatView extends ItemView {
 		if (this.transcriptEl.childElementCount > 0) {
 			await this.startNewSession();
 		}
-		const quoted = selection
-			.replace(/\r\n/g, "\n")
-			.trimEnd()
-			.split("\n")
-			.map((l) => `> ${l}`)
-			.join("\n");
-		const block = `Regarding \`${pagePath}\`, this selection:\n\n${quoted}\n\n`;
-		this.inputEl.value = block;
+		this.pendingContext = { pagePath, selection: selection.replace(/\r\n/g, "\n").trim() };
+		this.renderPendingContext();
+		this.inputEl.value = "";
 		this.inputEl.focus();
-		const end = this.inputEl.value.length;
-		this.inputEl.setSelectionRange(end, end);
-		this.inputEl.scrollTop = this.inputEl.scrollHeight;
-		this.setStatus(`Loaded selection from ${pagePath} — type your question and send.`);
+		this.setStatus(`Context from ${pagePath} attached — type your question.`);
+	}
+
+	private renderPendingContext(): void {
+		this.contextEl.empty();
+		if (!this.pendingContext) {
+			this.contextEl.hide();
+			return;
+		}
+		this.contextEl.show();
+
+		const head = this.contextEl.createDiv({ cls: "pi-context-head" });
+		const icon = head.createSpan({ cls: "pi-context-icon" });
+		setIcon(icon, "text-quote");
+		const pathEl = head.createSpan({ cls: "pi-context-path", text: this.pendingContext.pagePath });
+		pathEl.setAttribute("aria-label", `Open ${this.pendingContext.pagePath}`);
+		pathEl.addEventListener("click", () => {
+			if (this.pendingContext) void this.app.workspace.openLinkText(this.pendingContext.pagePath, "", false);
+		});
+		const clear = head.createEl("button", { cls: "pi-context-clear", attr: { "aria-label": "Remove context" } });
+		setIcon(clear, "x");
+		clear.addEventListener("click", () => {
+			this.pendingContext = null;
+			this.renderPendingContext();
+		});
+
+		this.contextEl.createDiv({ cls: "pi-context-body", text: this.pendingContext.selection });
 	}
 
 	private async startNewSession(): Promise<void> {
@@ -360,10 +384,23 @@ export class PiChatView extends ItemView {
 			new Notice("The agent is not running. Try Reconnect.");
 			return;
 		}
-		this.appendUserMessage(text);
+
+		// Fold any attached selection context into this message, then clear the chip.
+		let message = text;
+		if (this.pendingContext) {
+			const quoted = this.pendingContext.selection
+				.split("\n")
+				.map((l) => `> ${l}`)
+				.join("\n");
+			message = `Regarding \`${this.pendingContext.pagePath}\`, this selection:\n\n${quoted}\n\n${text}`;
+			this.pendingContext = null;
+			this.renderPendingContext();
+		}
+
+		this.appendUserMessage(message);
 
 		try {
-			const res = await this.backend.prompt(text, this.streaming);
+			const res = await this.backend.prompt(message, this.streaming);
 			if (!res.ok) {
 				if (this.streaming) new Notice(res.error ?? "Message rejected.");
 				else this.setStatus(res.error ?? "Prompt rejected.", true);

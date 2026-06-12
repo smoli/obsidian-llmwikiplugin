@@ -95,10 +95,12 @@ running). The file name is configurable in settings.
 Select text in any note (edit / live-preview mode), right-click, and choose
 **"Ask <engine> about selection"** (the label reflects your selected engine —
 "Ask pi…" or "Ask Claude Code…"; also available as the command *Ask the agent
-about selection*). This opens a fresh chat session seeded with the selected text
-and the page it came from, and leaves the cursor in the input so you can type
-your question. The agent still has full vault access, so it can pull in anything
-else it needs to answer.
+about selection*). This opens a fresh chat session and attaches the selected
+text and its page as a read-only **context chip above the input** (click the
+path to open the page, or the × to remove it). Type your question in the clean
+input box; the attached selection is prepended to your message when you send,
+then the chip clears. The agent still has full vault access, so it can pull in
+anything else it needs to answer.
 
 ## Automation: run on new file
 
