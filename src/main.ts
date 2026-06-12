@@ -3,6 +3,7 @@ import { PI_VIEW_TYPE, PiChatView } from "./chat-view";
 import { DEFAULT_SETTINGS, PiAgentSettingTab, PiAgentSettings } from "./settings";
 import { PromptStore } from "./prompts";
 import * as path from "path";
+import * as fs from "fs";
 
 export default class PiAgentPlugin extends Plugin {
 	declare settings: PiAgentSettings;
@@ -85,6 +86,18 @@ export default class PiAgentPlugin extends Plugin {
 	refreshOpenViews(): void {
 		for (const leaf of this.app.workspace.getLeavesOfType(PI_VIEW_TYPE)) {
 			if (leaf.view instanceof PiChatView) leaf.view.reloadPrompts();
+		}
+	}
+
+	/** Absolute path to the working directory's AGENTS.md, if it exists. */
+	getAgentsFile(): string | null {
+		const cwd = this.getWorkingDir();
+		if (!cwd) return null;
+		const p = path.join(cwd, "AGENTS.md");
+		try {
+			return fs.existsSync(p) ? p : null;
+		} catch {
+			return null;
 		}
 	}
 

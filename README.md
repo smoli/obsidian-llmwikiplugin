@@ -10,34 +10,46 @@ This was built for an LLM-wiki vault (Karpathy-style): a `raw/` → `summaries/`
 
 ## How it works
 
-The plugin spawns `pi --mode rpc` as a background process with its working
-directory set to your vault root (or a configured subfolder). Because pi
-discovers `AGENTS.md` by walking up from its working directory, it automatically
-picks up your wiki's rules, and its built-in `read` / `write` / `edit` / `bash`
-tools operate directly on the vault's files.
+The plugin drives an **agent engine** as a background process whose working
+directory is your vault root (or a configured subfolder), so its file tools
+operate directly on the vault and it picks up your `AGENTS.md`. You choose the
+engine in the panel header (or settings):
 
-Communication uses pi's JSON-over-stdio RPC protocol. The panel streams the
-agent's text, shows each tool call (collapsible), and surfaces provider errors.
+- **pi** — spawned as `pi --mode rpc`. Discovers `AGENTS.md` automatically; lists
+  and switches across every model pi has credentials for (67+); supports a
+  thinking-level control.
+- **Claude Code** — spawned as `claude --print --input-format stream-json
+  --output-format stream-json --include-partial-messages`. Your vault's
+  `AGENTS.md` is injected via `--append-system-prompt-file` (Claude Code natively
+  reads `CLAUDE.md`, so this is how it learns the wiki rules). Permission
+  behavior is configurable (see below).
+
+Both engines are adapted to one normalized event stream, so the panel — streaming
+text, collapsible tool calls, clickable page links, quick prompts, error
+surfacing — works identically regardless of engine.
 
 ```
-Obsidian panel  ⇄  pi --mode rpc  (cwd = vault root)  ⇄  your chosen LLM
+Obsidian panel  ⇄  AgentBackend  ⇄  pi --mode rpc            ⇄  your chosen LLM
+                                 ⇄  claude --print (stream-json) ⇄  Claude
                           │
-                          ├─ reads AGENTS.md automatically
+                          ├─ runs in the vault root (sees AGENTS.md)
                           └─ read/write/edit tools act on wiki pages
 ```
 
 ## Requirements
 
-- **pi** installed and on your `PATH`:
-  ```
-  npm install -g @earendil-works/pi-coding-agent
-  ```
-  (verify with `pi --version`). If it is not on `PATH`, set the full path to
-  `pi` / `pi.cmd` in the plugin settings.
-- At least one provider configured for pi (API key or login). Run `pi` once in a
-  terminal to set up credentials; they live in `~/.pi/agent/auth.json`.
 - Desktop Obsidian (the plugin needs Node child-process access; it is marked
   `isDesktopOnly`).
+- For the **pi** engine: pi installed and on your `PATH`
+  (`npm install -g @earendil-works/pi-coding-agent`; verify with `pi --version`),
+  plus at least one provider configured (run `pi` once to set up credentials in
+  `~/.pi/agent/auth.json`). If pi isn't on `PATH`, set the full path in settings.
+- For the **Claude Code** engine: the Claude Code CLI installed
+  (verify with `claude --version`). If `claude` isn't on Obsidian's `PATH`, set
+  the full path in settings (on Windows it is typically
+  `C:\Users\<you>\.local\bin\claude.exe`). Uses your existing Claude Code login.
+
+You only need the engine(s) you intend to use.
 
 ## Usage
 
@@ -82,14 +94,24 @@ running). The file name is configurable in settings.
 
 | Setting | Description |
 |---|---|
+| Engine | Which agent to run: **pi** or **Claude Code**. Also switchable from the panel header. |
 | Pi command | Command/path used to launch pi (default `pi`). |
 | Working directory | Folder pi runs in, relative to the vault root. Empty = vault root (where `AGENTS.md` is). |
 | Default provider / model | Passed to pi at startup. You can also switch live. |
 | Thinking level | Reasoning effort. |
 | Persist sessions | Save conversations to pi's session store so they can be resumed. |
 | Show thinking | Display the agent's reasoning blocks. |
-| Tool permission dialogs | Ask / always allow / always block confirmation prompts pi raises. |
+| Tool permission dialogs | Ask / always allow / always block confirmation prompts pi raises (and Claude's permission asks). |
 | Prompts file | Vault-root JSON file holding the one-click standard prompts. |
+| Claude command | Command/path to the Claude Code CLI (default `claude`). |
+| Claude model | `default` / Opus / Sonnet / Haiku. |
+| Permissions (Claude) | **Bypass all** (edits + bash/git, no prompts — needed for the full wiki workflow), **Auto-accept edits only** (edits auto-approved, bash restricted), or **Ask me per tool** (prompts in the panel). |
+
+> **Claude permissions:** the AGENTS.md wiki workflow ends with a `git commit`,
+> which is a bash action. "Auto-accept edits only" will *not* run it — use
+> "Bypass all" (the default) for the complete workflow, or "Ask me per tool" to
+> approve each step. The plugin runs Claude scoped to your vault's working
+> directory; your vault being a git repo is your safety net.
 
 ## Development
 

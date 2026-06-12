@@ -137,6 +137,23 @@
 	overflow-wrap: anywhere;
 }
 
+/* ----- vault page links inside agent output ----- */
+
+.pi-page-link {
+	color: var(--link-color);
+	text-decoration: var(--link-decoration, underline);
+	text-decoration-color: var(--link-color);
+	cursor: pointer;
+}
+.pi-page-link:hover {
+	color: var(--link-color-hover, var(--link-color));
+	text-decoration: var(--link-decoration-hover, underline);
+}
+/* When the path was inside an inline code span, keep the mono look. */
+code .pi-page-link {
+	color: var(--link-color);
+}
+
 /* ----- tool blocks ----- */
 
 .pi-tool {

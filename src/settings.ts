@@ -4,6 +4,8 @@ import { ThinkingLevel } from "./rpc-types";
 import { StandardPrompt, makeId } from "./prompts";
 
 export interface PiAgentSettings {
+	/** Which agent engine to drive: pi or the Claude Code CLI. */
+	engine: "pi" | "claude";
 	/** Command or absolute path used to launch pi. */
 	piPath: string;
 	/**
@@ -29,9 +31,18 @@ export interface PiAgentSettings {
 	dialogPolicy: "ask" | "allow" | "block";
 	/** Name of the JSON file (at the vault root) holding standard prompts. */
 	promptsFile: string;
+
+	// --- Claude Code engine ---
+	/** Command or absolute path used to launch the Claude Code CLI. */
+	claudePath: string;
+	/** Permission handling for Claude Code's tools in the vault. */
+	claudePermissionMode: "bypassPermissions" | "acceptEdits" | "default";
+	/** Model for Claude Code: "default" | "opus" | "sonnet" | "haiku" | explicit id. */
+	claudeModel: string;
 }
 
 export const DEFAULT_SETTINGS: PiAgentSettings = {
+	engine: "pi",
 	piPath: "pi",
 	workingDir: "",
 	provider: "",
@@ -41,6 +52,9 @@ export const DEFAULT_SETTINGS: PiAgentSettings = {
 	showThinking: false,
 	dialogPolicy: "ask",
 	promptsFile: "pi-agent-prompts.json",
+	claudePath: "claude",
+	claudePermissionMode: "bypassPermissions",
+	claudeModel: "default",
 };
 
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
@@ -60,6 +74,20 @@ export class PiAgentSettingTab extends PluginSettingTab {
 				"Pi runs as a background process scoped to your vault. It reads the vault's AGENTS.md and can read, create, and edit your wiki pages. Restart the chat panel (or reopen it) after changing these settings.",
 			cls: "setting-item-description",
 		});
+
+		new Setting(containerEl)
+			.setName("Engine")
+			.setDesc("Which agent to run in the panel. Reopen or reconnect the panel after changing.")
+			.addDropdown((d) => {
+				d.addOption("pi", "pi");
+				d.addOption("claude", "Claude Code");
+				d.setValue(this.plugin.settings.engine).onChange(async (v) => {
+					this.plugin.settings.engine = v as PiAgentSettings["engine"];
+					await this.plugin.saveSettings();
+				});
+			});
+
+		containerEl.createEl("h3", { text: "pi" });
 
 		new Setting(containerEl)
 			.setName("Pi command")
@@ -153,6 +181,56 @@ export class PiAgentSettingTab extends PluginSettingTab {
 				d.addOption("block", "Always block");
 				d.setValue(this.plugin.settings.dialogPolicy).onChange(async (v) => {
 					this.plugin.settings.dialogPolicy = v as PiAgentSettings["dialogPolicy"];
+					await this.plugin.saveSettings();
+				});
+			});
+
+		// ----- Claude Code engine -----
+		containerEl.createEl("h3", { text: "Claude Code" });
+		containerEl.createEl("p", {
+			text:
+				"Used when the engine is set to Claude Code. Claude reads your vault's AGENTS.md (injected as an appended system prompt) and operates on files in the working directory.",
+			cls: "setting-item-description",
+		});
+
+		new Setting(containerEl)
+			.setName("Claude command")
+			.setDesc("Command or absolute path to the Claude Code CLI (e.g. claude, or C:\\Users\\you\\.local\\bin\\claude.exe).")
+			.addText((t) =>
+				t
+					.setPlaceholder("claude")
+					.setValue(this.plugin.settings.claudePath)
+					.onChange(async (v) => {
+						this.plugin.settings.claudePath = v.trim() || "claude";
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Claude model")
+			.setDesc("Model alias or id. 'default' uses Claude Code's configured default.")
+			.addDropdown((d) => {
+				d.addOption("default", "Claude Code default");
+				d.addOption("opus", "Opus");
+				d.addOption("sonnet", "Sonnet");
+				d.addOption("haiku", "Haiku");
+				d.setValue(this.plugin.settings.claudeModel || "default").onChange(async (v) => {
+					this.plugin.settings.claudeModel = v;
+					await this.plugin.saveSettings();
+				});
+			});
+
+		new Setting(containerEl)
+			.setName("Permissions")
+			.setDesc(
+				"How Claude Code handles file/command permissions. Bypass all: edits, creates and runs bash (incl. git) without prompts — needed for the full AGENTS.md wiki workflow. Auto-accept edits: file edits only, bash restricted. Ask per tool: prompts you in the panel for each tool."
+			)
+			.addDropdown((d) => {
+				d.addOption("bypassPermissions", "Bypass all (autonomous)");
+				d.addOption("acceptEdits", "Auto-accept edits only");
+				d.addOption("default", "Ask me per tool");
+				d.setValue(this.plugin.settings.claudePermissionMode).onChange(async (v) => {
+					this.plugin.settings.claudePermissionMode = v as PiAgentSettings["claudePermissionMode"];
 					await this.plugin.saveSettings();
 				});
 			});
