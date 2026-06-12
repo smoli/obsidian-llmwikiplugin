@@ -110,6 +110,44 @@ Manage them two ways, both backed by the same file:
 Clicking a button sends its prompt immediately (and *steers* pi if it's already
 running). The file name is configurable in settings.
 
+## Saving a chat
+
+The **save** button (disk icon) in the header writes the current conversation to
+a Markdown file in your vault. Only **user messages and assistant text** are
+saved — tool/bash calls are omitted, so it reads as a clean transcript you can
+copy from or keep.
+
+Clicking save again on the **same conversation updates the same file** (it
+doesn't pile up duplicates); the file is created on the first save and overwritten
+on later ones, keeping its original name and date/time. Starting a new session
+(or switching engine/persona) begins a fresh chat that saves to a new file. If you
+move or delete the saved file, the next save creates a new one.
+
+The target folder is set under **Settings → Chats → Chat save folder** (default
+`Chats`, empty = vault root). Each file gets frontmatter with the engine, model,
+persona, date and time:
+
+```markdown
+---
+date: 2026-06-12
+time: 14:30
+engine: claude
+model: "Opus"
+persona: "Sparringspartner"
+---
+
+## You
+
+…
+
+## Assistant
+
+…
+```
+
+You can also select text directly in the panel and copy it (text selection is
+enabled in the chat).
+
 ## Personas
 
 By default the agent uses your vault's `AGENTS.md` as its system prompt.

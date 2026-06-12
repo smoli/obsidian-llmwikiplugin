@@ -7,6 +7,7 @@ import {
 	PaneType,
 	TFile,
 	WorkspaceLeaf,
+	normalizePath,
 	setIcon,
 } from "obsidian";
 import { runCapture, runGit } from "./git";
@@ -56,6 +57,12 @@ export class PiChatView extends ItemView {
 	// Page (and optional selection) attached via the "ask about" context menu,
 	// prepended to the next message.
 	private pendingContext: { pagePath: string; selection?: string } | null = null;
+
+	// Plain conversation record (user + assistant text only) for saving to Markdown.
+	private transcript: { role: "user" | "assistant"; text: string }[] = [];
+	// Where this conversation was first saved, so re-saving updates the same file.
+	private savedChatPath: string | null = null;
+	private savedChatStamp: { date: string; time: string } | null = null;
 
 	constructor(leaf: WorkspaceLeaf, private plugin: PiAgentPlugin) {
 		super(leaf);
@@ -125,6 +132,10 @@ export class PiChatView extends ItemView {
 		setIcon(newBtn, "plus");
 		newBtn.addEventListener("click", () => this.startNewSession());
 
+		const saveBtn = header.createEl("button", { cls: "pi-icon-btn", attr: { "aria-label": "Save chat as Markdown" } });
+		setIcon(saveBtn, "save");
+		saveBtn.addEventListener("click", () => this.saveChat());
+
 		this.stopBtn = header.createEl("button", { cls: "pi-icon-btn pi-stop-btn", attr: { "aria-label": "Stop" } });
 		setIcon(this.stopBtn, "square");
 		this.stopBtn.hide();
@@ -144,7 +155,7 @@ export class PiChatView extends ItemView {
 		this.plugin.settings.engine = engine;
 		await this.plugin.saveSettings();
 		this.teardownBackend();
-		this.transcriptEl.empty();
+		this.resetTranscript();
 		await this.connect();
 	}
 
@@ -166,10 +177,114 @@ export class PiChatView extends ItemView {
 		this.plugin.settings.selectedPersona = this.personaSelect.value;
 		await this.plugin.saveSettings();
 		this.teardownBackend();
-		this.transcriptEl.empty();
+		this.resetTranscript();
 		await this.connect();
 		const name = this.personaSelect.selectedOptions[0]?.text ?? "Default";
 		this.setStatus(`Persona: ${name}`);
+	}
+
+	// ----------------------------------------------------------- save chat
+
+	/** Save the conversation (user + assistant text, no tool calls) as Markdown. */
+	private async saveChat(): Promise<void> {
+		if (this.transcript.length === 0) {
+			new Notice("No conversation to save yet.");
+			return;
+		}
+
+		const folder = (this.plugin.settings.chatSaveFolder || "").trim().replace(/^[\\/]+|[\\/]+$/g, "");
+		if (folder && !this.app.vault.getAbstractFileByPath(folder)) {
+			try {
+				await this.app.vault.createFolder(folder);
+			} catch {
+				/* may already exist due to a race; ignore */
+			}
+		}
+
+		// Stamp once per conversation so re-saving keeps the original date/time and name.
+		if (!this.savedChatStamp) {
+			const now = new Date();
+			const pad = (n: number) => String(n).padStart(2, "0");
+			this.savedChatStamp = {
+				date: `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`,
+				time: `${pad(now.getHours())}:${pad(now.getMinutes())}`,
+			};
+		}
+		const { date, time } = this.savedChatStamp;
+		const model = this.modelSelect.selectedOptions[0]?.text || this.modelSelect.value || "(unknown)";
+		const persona = (this.personaSelect.selectedOptions[0]?.text || "Default (AGENTS.md)").replace(/^🎭\s*/, "");
+
+		const frontmatter = [
+			"---",
+			`date: ${date}`,
+			`time: ${time}`,
+			`engine: ${this.plugin.settings.engine}`,
+			`model: ${JSON.stringify(model)}`,
+			`persona: ${JSON.stringify(persona)}`,
+			"---",
+			"",
+		].join("\n");
+
+		const content = frontmatter + this.buildTranscriptMarkdown();
+
+		// Re-saving the same conversation updates the file created the first time.
+		if (this.savedChatPath) {
+			const existing = this.app.vault.getAbstractFileByPath(this.savedChatPath);
+			if (existing instanceof TFile) {
+				try {
+					await this.app.vault.modify(existing, content);
+					new Notice(`Chat aktualisiert: ${existing.path}`);
+				} catch (err: any) {
+					new Notice(`Speichern fehlgeschlagen: ${err?.message ?? err}`);
+				}
+				return;
+			}
+			this.savedChatPath = null; // file was moved/deleted — make a fresh one
+		}
+
+		const firstUser = this.transcript.find((t) => t.role === "user")?.text ?? "Chat";
+		const base = `${date} ${time.replace(":", "")} ${this.fileSlug(firstUser)}`.trim();
+		const dir = folder ? folder + "/" : "";
+		let name = `${base}.md`;
+		for (let i = 1; this.app.vault.getAbstractFileByPath(normalizePath(dir + name)); i++) {
+			name = `${base} (${i}).md`;
+		}
+
+		try {
+			const file = await this.app.vault.create(normalizePath(dir + name), content);
+			this.savedChatPath = file.path;
+			new Notice(`Chat gespeichert: ${file.path}`);
+		} catch (err: any) {
+			new Notice(`Speichern fehlgeschlagen: ${err?.message ?? err}`);
+		}
+	}
+
+	private buildTranscriptMarkdown(): string {
+		const parts: string[] = [];
+		let lastRole = "";
+		for (const m of this.transcript) {
+			const text = m.text.trim();
+			if (!text) continue;
+			if (m.role === lastRole) {
+				parts.push("", text);
+			} else {
+				parts.push("", m.role === "user" ? "## You" : "## Assistant", "", text);
+				lastRole = m.role;
+			}
+		}
+		return parts.join("\n").trim() + "\n";
+	}
+
+	/** Short, filesystem-safe slug from the first line of a message. */
+	private fileSlug(s: string): string {
+		const firstLine = s.split("\n").map((l) => l.trim()).filter(Boolean)[0] ?? "Chat";
+		const cleaned = firstLine
+			.replace(/[\\/:*?"<>|#^[\]]/g, "")
+			.replace(/\s+/g, " ")
+			.trim()
+			.slice(0, 50)
+			.trim();
+		return cleaned || "Chat";
 	}
 
 	// ------------------------------------------------------------------- git
@@ -419,6 +534,15 @@ export class PiChatView extends ItemView {
 		await this.refreshStats();
 	}
 
+	/** Clear the transcript DOM and the saved-conversation record. */
+	private resetTranscript(): void {
+		this.transcriptEl.empty();
+		this.transcript = [];
+		this.workingEl = null;
+		this.savedChatPath = null;
+		this.savedChatStamp = null;
+	}
+
 	private teardownBackend(): void {
 		if (this.backend) {
 			this.backend.dispose();
@@ -510,12 +634,12 @@ export class PiChatView extends ItemView {
 	private async startNewSession(): Promise<void> {
 		if (!this.backend?.running) {
 			this.teardownBackend();
-			this.transcriptEl.empty();
+			this.resetTranscript();
 			await this.connect();
 			return;
 		}
 		await this.backend.newSession();
-		this.transcriptEl.empty();
+		this.resetTranscript();
 		this.resetStreamState();
 		this.setStatus("Started a new session.");
 		await this.refreshStats();
@@ -749,6 +873,7 @@ export class PiChatView extends ItemView {
 	}
 
 	private appendUserMessage(text: string): void {
+		this.transcript.push({ role: "user", text });
 		const block = this.appendBlock("pi-msg pi-msg-user");
 		const body = block.createDiv({ cls: "pi-msg-body" });
 		this.renderMarkdownInto(body, text);
@@ -1023,6 +1148,7 @@ export class PiChatView extends ItemView {
 	private finalizeText(): void {
 		if (this.currentTextEl) {
 			this.renderMarkdownInto(this.currentTextEl, this.currentText, true);
+			if (this.currentText.trim()) this.transcript.push({ role: "assistant", text: this.currentText });
 		}
 		this.currentTextEl = null;
 		this.currentText = "";

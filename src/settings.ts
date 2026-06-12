@@ -55,6 +55,9 @@ export interface PiAgentSettings {
 
 	/** Vault-relative path of the selected persona file, or "" for AGENTS.md. */
 	selectedPersona: string;
+
+	/** Vault-relative folder where saved chats are written. */
+	chatSaveFolder: string;
 }
 
 export const DEFAULT_SETTINGS: PiAgentSettings = {
@@ -74,6 +77,7 @@ export const DEFAULT_SETTINGS: PiAgentSettings = {
 	claudeAgentsMode: "append",
 	gitSuggestCommitMessage: true,
 	selectedPersona: "",
+	chatSaveFolder: "Chats",
 	autoRunEnabled: false,
 	autoRunFolder: "99-raw",
 	autoRunPrompt:
@@ -271,6 +275,22 @@ export class PiAgentSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				});
 			});
+
+		// ----- chats -----
+		containerEl.createEl("h3", { text: "Chats" });
+
+		new Setting(containerEl)
+			.setName("Chat save folder")
+			.setDesc("Vault-relative folder where the Save chat button writes Markdown files. Empty = vault root.")
+			.addText((t) =>
+				t
+					.setPlaceholder("Chats")
+					.setValue(this.plugin.settings.chatSaveFolder)
+					.onChange(async (v) => {
+						this.plugin.settings.chatSaveFolder = v.trim().replace(/^[\\/]+|[\\/]+$/g, "");
+						await this.plugin.saveSettings();
+					})
+			);
 
 		// ----- git -----
 		containerEl.createEl("h3", { text: "Git" });
