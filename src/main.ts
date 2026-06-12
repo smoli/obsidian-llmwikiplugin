@@ -1,6 +1,6 @@
 import { Editor, FileSystemAdapter, MarkdownFileInfo, Menu, Notice, Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
-import { PI_VIEW_TYPE, PiChatView } from "./chat-view";
-import { DEFAULT_SETTINGS, PiAgentSettingTab, PiAgentSettings } from "./settings";
+import { VIEW_TYPE, LlmChatView } from "./chat-view";
+import { DEFAULT_SETTINGS, LlmAgentSettingTab, LlmAgentSettings } from "./settings";
 import { PromptStore } from "./prompts";
 import { SessionStore } from "./sessions";
 import * as path from "path";
@@ -12,8 +12,8 @@ export interface Persona {
 	name: string;
 }
 
-export default class PiAgentPlugin extends Plugin {
-	declare settings: PiAgentSettings;
+export default class LlmAgentPlugin extends Plugin {
+	declare settings: LlmAgentSettings;
 	promptStore!: PromptStore;
 	sessionStore!: SessionStore;
 
@@ -38,29 +38,29 @@ export default class PiAgentPlugin extends Plugin {
 			})
 		);
 
-		this.registerView(PI_VIEW_TYPE, (leaf: WorkspaceLeaf) => new PiChatView(leaf, this));
+		this.registerView(VIEW_TYPE, (leaf: WorkspaceLeaf) => new LlmChatView(leaf, this));
 
-		this.addRibbonIcon("bot", "Open Pi Agent", () => this.activateView());
+		this.addRibbonIcon("bot", "Open LLM Agent", () => this.activateView());
 
 		this.addCommand({
-			id: "open-pi-agent",
-			name: "Open Pi Agent panel",
+			id: "open-llm-agent",
+			name: "Open LLM Agent panel",
 			callback: () => this.activateView(),
 		});
 
 		this.addCommand({
-			id: "pi-agent-new-session",
-			name: "Pi Agent: new session",
+			id: "llm-agent-new-session",
+			name: "LLM Agent: new session",
 			callback: async () => {
 				const leaf = await this.activateView();
-				if (leaf?.view instanceof PiChatView) {
+				if (leaf?.view instanceof LlmChatView) {
 					await leaf.view.newSessionCommand();
 				}
 			},
 		});
 
 		this.addCommand({
-			id: "pi-agent-ask-about-selection",
+			id: "llm-agent-ask-about-selection",
 			name: "Ask the agent about selection or page",
 			editorCallback: (editor: Editor, info: MarkdownFileInfo) => {
 				const selection = editor.getSelection();
@@ -87,7 +87,7 @@ export default class PiAgentPlugin extends Plugin {
 			})
 		);
 
-		this.addSettingTab(new PiAgentSettingTab(this.app, this));
+		this.addSettingTab(new LlmAgentSettingTab(this.app, this));
 
 		// Register the folder watcher only after layout is ready. Obsidian replays
 		// a "create" event for every existing file during startup; waiting for
@@ -102,7 +102,7 @@ export default class PiAgentPlugin extends Plugin {
 			window.clearTimeout(this.autoRunTimer);
 			this.autoRunTimer = null;
 		}
-		// Views are detached by Obsidian; PiChatView.onClose disposes its backend.
+		// Views are detached by Obsidian; LlmChatView.onClose disposes its backend.
 	}
 
 	// ----------------------------------------------------- folder-watch auto-run
@@ -136,7 +136,7 @@ export default class PiAgentPlugin extends Plugin {
 			.replace(/\{\{count\}\}/g, String(files.length));
 
 		const leaf = await this.activateView();
-		if (leaf?.view instanceof PiChatView) {
+		if (leaf?.view instanceof LlmChatView) {
 			await leaf.view.runPrompt(prompt);
 		}
 	}
@@ -151,10 +151,10 @@ export default class PiAgentPlugin extends Plugin {
 	async activateView(): Promise<WorkspaceLeaf | null> {
 		const { workspace } = this.app;
 
-		let leaf: WorkspaceLeaf | null = workspace.getLeavesOfType(PI_VIEW_TYPE)[0] ?? null;
+		let leaf: WorkspaceLeaf | null = workspace.getLeavesOfType(VIEW_TYPE)[0] ?? null;
 		if (!leaf) {
 			const right: WorkspaceLeaf | null = workspace.getRightLeaf(false);
-			if (right) await right.setViewState({ type: PI_VIEW_TYPE, active: true });
+			if (right) await right.setViewState({ type: VIEW_TYPE, active: true });
 			leaf = right;
 		}
 		if (leaf) workspace.revealLeaf(leaf);
@@ -174,7 +174,7 @@ export default class PiAgentPlugin extends Plugin {
 		}
 		const pagePath = file ? this.toAgentPath(file.path) : "(unknown page)";
 		const leaf = await this.activateView();
-		if (leaf?.view instanceof PiChatView) {
+		if (leaf?.view instanceof LlmChatView) {
 			await leaf.view.seedContext(pagePath, selection);
 		}
 	}
@@ -234,7 +234,7 @@ export default class PiAgentPlugin extends Plugin {
 			content = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
 			if (!content) return null;
 			const slug = sel.replace(/[^a-zA-Z0-9]+/g, "-");
-			const tmp = path.join(os.tmpdir(), `pi-agent-persona-${slug}.md`);
+			const tmp = path.join(os.tmpdir(), `llm-agent-persona-${slug}.md`);
 			fs.writeFileSync(tmp, content + "\n", "utf8");
 			return tmp;
 		} catch {
@@ -248,10 +248,10 @@ export default class PiAgentPlugin extends Plugin {
 		this.refreshOpenViews();
 	}
 
-	/** Tell every open Pi panel to rebuild its quick-prompt bar. */
+	/** Tell every open LLM Agent panel to rebuild its quick-prompt bar. */
 	refreshOpenViews(): void {
-		for (const leaf of this.app.workspace.getLeavesOfType(PI_VIEW_TYPE)) {
-			if (leaf.view instanceof PiChatView) leaf.view.reloadPrompts();
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+			if (leaf.view instanceof LlmChatView) leaf.view.reloadPrompts();
 		}
 	}
 

@@ -1,13 +1,13 @@
-/* ===== Pi Agent panel ===== */
+/* ===== LLM Agent panel ===== */
 
-.pi-agent-view {
+.llm-agent-view {
 	display: flex;
 	flex-direction: column;
 	height: 100%;
 	padding: 0;
 }
 
-.pi-header {
+.llm-header {
 	display: flex;
 	align-items: center;
 	gap: 6px;
@@ -16,7 +16,7 @@
 	flex-wrap: wrap;
 }
 
-.pi-select {
+.llm-select {
 	max-width: 100%;
 	font-size: var(--font-ui-smaller);
 	padding: 2px 4px;
@@ -26,12 +26,12 @@
 	border: 1px solid var(--background-modifier-border);
 }
 
-.pi-model-select {
+.llm-model-select {
 	flex: 1 1 140px;
 	min-width: 100px;
 }
 
-.pi-icon-btn {
+.llm-icon-btn {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -42,25 +42,25 @@
 	cursor: pointer;
 	border-radius: var(--radius-s);
 }
-.pi-icon-btn:hover {
+.llm-icon-btn:hover {
 	background: var(--background-modifier-hover);
 	color: var(--text-normal);
 }
-.pi-stop-btn {
+.llm-stop-btn {
 	color: var(--text-error);
 }
 
-.pi-status {
+.llm-status {
 	font-size: var(--font-ui-smaller);
 	color: var(--text-muted);
 	padding: 4px 8px;
 	border-bottom: 1px solid var(--background-modifier-border);
 	overflow-wrap: anywhere;
 }
-.pi-status-error {
+.llm-status-error {
 	color: var(--text-error);
 }
-.pi-reconnect-btn {
+.llm-reconnect-btn {
 	margin-left: 8px;
 	font-size: var(--font-ui-smaller);
 	padding: 1px 8px;
@@ -68,7 +68,7 @@
 
 /* ----- transcript ----- */
 
-.pi-transcript {
+.llm-transcript {
 	flex: 1;
 	min-height: 0;
 	overflow-y: auto;
@@ -84,46 +84,46 @@
 }
 /* Keep each message/tool row at its natural height — without this, the column
    flexbox shrinks rows vertically as the transcript fills instead of scrolling. */
-.pi-transcript > * {
+.llm-transcript > * {
 	flex: 0 0 auto;
 }
 
-.pi-msg {
+.llm-msg {
 	border-radius: var(--radius-m);
 	padding: 6px 10px;
 	max-width: 100%;
 }
-.pi-msg-body > :first-child {
+.llm-msg-body > :first-child {
 	margin-top: 0;
 }
-.pi-msg-body > :last-child {
+.llm-msg-body > :last-child {
 	margin-bottom: 0;
 }
 
-.pi-msg-user {
+.llm-msg-user {
 	background: var(--background-modifier-hover);
 	border: 1px solid var(--background-modifier-border);
 	align-self: flex-end;
 	max-width: 92%;
 }
 
-.pi-msg-assistant {
+.llm-msg-assistant {
 	background: transparent;
 }
 
-.pi-msg-thinking {
+.llm-msg-thinking {
 	background: var(--background-secondary);
 	border-left: 2px solid var(--text-faint);
 	opacity: 0.85;
 }
-.pi-thinking-label {
+.llm-thinking-label {
 	font-size: var(--font-ui-smaller);
 	color: var(--text-faint);
 	text-transform: uppercase;
 	letter-spacing: 0.05em;
 	margin-bottom: 2px;
 }
-.pi-thinking-body {
+.llm-thinking-body {
 	white-space: pre-wrap;
 	font-size: var(--font-ui-smaller);
 	color: var(--text-muted);
@@ -131,18 +131,18 @@
 	background: transparent;
 }
 
-.pi-msg-error {
+.llm-msg-error {
 	background: var(--background-modifier-error-hover, rgba(220, 70, 70, 0.12));
 	border: 1px solid var(--text-error);
 }
-.pi-error-label {
+.llm-error-label {
 	font-size: var(--font-ui-smaller);
 	color: var(--text-error);
 	text-transform: uppercase;
 	letter-spacing: 0.05em;
 	margin-bottom: 2px;
 }
-.pi-error-body {
+.llm-error-body {
 	color: var(--text-normal);
 	white-space: pre-wrap;
 	overflow-wrap: anywhere;
@@ -150,33 +150,33 @@
 
 /* ----- vault page links inside agent output ----- */
 
-.pi-page-link {
+.llm-page-link {
 	color: var(--link-color);
 	text-decoration: var(--link-decoration, underline);
 	text-decoration-color: var(--link-color);
 	cursor: pointer;
 }
-.pi-page-link:hover {
+.llm-page-link:hover {
 	color: var(--link-color-hover, var(--link-color));
 	text-decoration: var(--link-decoration-hover, underline);
 }
 /* When the path was inside an inline code span, keep the mono look. */
-code .pi-page-link {
+code .llm-page-link {
 	color: var(--link-color);
 }
 
 /* ----- clickable option chips (agent multiple-choice) ----- */
 
-.pi-options {
+.llm-options {
 	list-style: none;
 	margin: 8px 0;
 	padding-left: 0;
-	counter-reset: pi-opt;
+	counter-reset: llm-opt;
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
 }
-.pi-option {
+.llm-option {
 	position: relative;
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
@@ -185,53 +185,53 @@ code .pi-page-link {
 	cursor: pointer;
 	transition: background 0.1s ease, border-color 0.1s ease;
 }
-.pi-option::before {
-	counter-increment: pi-opt;
-	content: counter(pi-opt) ". ";
+.llm-option::before {
+	counter-increment: llm-opt;
+	content: counter(llm-opt) ". ";
 	font-weight: var(--font-semibold);
 	color: var(--text-accent);
 }
-.pi-option > :first-child {
+.llm-option > :first-child {
 	display: inline;
 	margin: 0;
 }
-.pi-option:hover {
+.llm-option:hover {
 	background: var(--background-modifier-hover);
 	border-color: var(--interactive-accent);
 }
-.pi-option-selected {
+.llm-option-selected {
 	border-color: var(--interactive-accent);
 	background: var(--background-modifier-hover);
 }
-.pi-options-answered .pi-option {
+.llm-options-answered .llm-option {
 	cursor: default;
 }
-.pi-options-answered .pi-option:not(.pi-option-selected) {
+.llm-options-answered .llm-option:not(.llm-option-selected) {
 	opacity: 0.5;
 }
 
 /* ----- working indicator ----- */
 
-.pi-working {
+.llm-working {
 	display: flex;
 	align-items: center;
 	gap: 5px;
 	padding: 8px 12px;
 }
-.pi-working-dot {
+.llm-working-dot {
 	width: 6px;
 	height: 6px;
 	border-radius: 50%;
 	background: var(--text-muted);
-	animation: pi-bounce 1.2s infinite ease-in-out both;
+	animation: llm-bounce 1.2s infinite ease-in-out both;
 }
-.pi-working-dot:nth-child(1) {
+.llm-working-dot:nth-child(1) {
 	animation-delay: -0.24s;
 }
-.pi-working-dot:nth-child(2) {
+.llm-working-dot:nth-child(2) {
 	animation-delay: -0.12s;
 }
-@keyframes pi-bounce {
+@keyframes llm-bounce {
 	0%,
 	80%,
 	100% {
@@ -246,26 +246,26 @@ code .pi-page-link {
 
 /* ----- tool blocks ----- */
 
-.pi-tool {
+.llm-tool {
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
 	background: var(--background-secondary);
 	overflow: hidden;
 }
-.pi-tool-error {
+.llm-tool-error {
 	border-color: var(--text-error);
 }
-.pi-tool-header {
+.llm-tool-header {
 	display: flex;
 	align-items: center;
 	padding: 4px 8px;
 	cursor: pointer;
 	gap: 6px;
 }
-.pi-tool-header:hover {
+.llm-tool-header:hover {
 	background: var(--background-modifier-hover);
 }
-.pi-tool-title {
+.llm-tool-title {
 	display: flex;
 	align-items: center;
 	gap: 6px;
@@ -273,22 +273,22 @@ code .pi-page-link {
 	min-width: 0;
 	font-size: var(--font-ui-smaller);
 }
-.pi-tool-icon {
+.llm-tool-icon {
 	display: inline-flex;
 	align-items: center;
 	flex: 0 0 auto;
 	color: var(--text-muted);
 }
-.pi-tool-icon svg {
+.llm-tool-icon svg {
 	width: 14px;
 	height: 14px;
 }
-.pi-tool-name {
+.llm-tool-name {
 	flex: 0 0 auto;
 	font-weight: var(--font-semibold);
 	color: var(--text-normal);
 }
-.pi-tool-arg {
+.llm-tool-arg {
 	flex: 1 1 auto;
 	min-width: 0;
 	color: var(--text-muted);
@@ -297,13 +297,13 @@ code .pi-page-link {
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
-.pi-tool-status {
+.llm-tool-status {
 	color: var(--text-faint);
 	font-size: var(--font-ui-smaller);
 	margin-left: auto;
 	white-space: nowrap;
 }
-.pi-tool-body {
+.llm-tool-body {
 	margin: 0;
 	padding: 8px;
 	max-height: 320px;
@@ -313,19 +313,19 @@ code .pi-page-link {
 	border-top: 1px solid var(--background-modifier-border);
 	background: var(--background-primary);
 }
-.pi-tool-body-error {
+.llm-tool-body-error {
 	color: var(--text-error);
 }
 
 /* ----- quick prompts ----- */
 
-.pi-quickbar {
+.llm-quickbar {
 	display: flex;
 	flex-wrap: wrap;
 	gap: 6px;
 	padding: 8px 8px 0 8px;
 }
-.pi-quick-btn {
+.llm-quick-btn {
 	font-size: var(--font-ui-smaller);
 	padding: 3px 10px;
 	border-radius: var(--radius-s);
@@ -338,13 +338,13 @@ code .pi-page-link {
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
-.pi-quick-btn:hover {
+.llm-quick-btn:hover {
 	background: var(--interactive-hover);
 }
 
 /* ----- attached selection context ----- */
 
-.pi-context {
+.llm-context {
 	margin: 8px 8px 0 8px;
 	border: 1px solid var(--background-modifier-border);
 	border-left: 3px solid var(--interactive-accent);
@@ -352,22 +352,22 @@ code .pi-page-link {
 	background: var(--background-secondary);
 	overflow: hidden;
 }
-.pi-context-head {
+.llm-context-head {
 	display: flex;
 	align-items: center;
 	gap: 6px;
 	padding: 4px 6px 4px 8px;
 	font-size: var(--font-ui-smaller);
 }
-.pi-context-icon {
+.llm-context-icon {
 	display: inline-flex;
 	color: var(--text-muted);
 }
-.pi-context-icon svg {
+.llm-context-icon svg {
 	width: 14px;
 	height: 14px;
 }
-.pi-context-path {
+.llm-context-path {
 	flex: 1;
 	min-width: 0;
 	color: var(--link-color);
@@ -377,10 +377,10 @@ code .pi-page-link {
 	overflow: hidden;
 	text-overflow: ellipsis;
 }
-.pi-context-path:hover {
+.llm-context-path:hover {
 	text-decoration: underline;
 }
-.pi-context-clear {
+.llm-context-clear {
 	display: inline-flex;
 	align-items: center;
 	justify-content: center;
@@ -391,15 +391,15 @@ code .pi-page-link {
 	cursor: pointer;
 	border-radius: var(--radius-s);
 }
-.pi-context-clear:hover {
+.llm-context-clear:hover {
 	background: var(--background-modifier-hover);
 	color: var(--text-normal);
 }
-.pi-context-clear svg {
+.llm-context-clear svg {
 	width: 14px;
 	height: 14px;
 }
-.pi-context-body {
+.llm-context-body {
 	padding: 6px 8px;
 	max-height: 120px;
 	overflow-y: auto;
@@ -411,14 +411,14 @@ code .pi-page-link {
 
 /* ----- input ----- */
 
-.pi-input-row {
+.llm-input-row {
 	display: flex;
 	gap: 6px;
 	padding: 8px;
 	border-top: 1px solid var(--background-modifier-border);
 	align-items: flex-end;
 }
-.pi-input {
+.llm-input {
 	flex: 1;
 	resize: vertical;
 	min-height: 2.6em;
@@ -426,31 +426,31 @@ code .pi-page-link {
 	font-family: inherit;
 	font-size: var(--font-ui-small);
 }
-.pi-send-btn {
+.llm-send-btn {
 	align-self: stretch;
 	padding: 0 14px;
 }
 
 /* ----- settings: prompt editor ----- */
 
-.pi-prompt-edit {
+.llm-prompt-edit {
 	border: 1px solid var(--background-modifier-border);
 	border-radius: var(--radius-m);
 	padding: 6px 10px 10px 10px;
 	margin-bottom: 10px;
 }
-.pi-prompt-edit .setting-item {
+.llm-prompt-edit .setting-item {
 	border-top: none;
 	padding-top: 4px;
 }
-.pi-prompt-text {
+.llm-prompt-text {
 	width: 100%;
 	resize: vertical;
 	min-height: 3.5em;
 	font-family: var(--font-monospace);
 	font-size: var(--font-ui-smaller);
 }
-.pi-prompts-actions {
+.llm-prompts-actions {
 	display: flex;
 	gap: 8px;
 	margin-top: 4px;
@@ -458,22 +458,22 @@ code .pi-page-link {
 
 /* ----- dialog modal ----- */
 
-.pi-dialog-options {
+.llm-dialog-options {
 	display: flex;
 	flex-direction: column;
 	gap: 6px;
 	margin: 10px 0;
 }
-.pi-dialog-option {
+.llm-dialog-option {
 	text-align: left;
 	padding: 6px 10px;
 }
-.pi-dialog-input,
-.pi-dialog-textarea {
+.llm-dialog-input,
+.llm-dialog-textarea {
 	width: 100%;
 	margin: 8px 0;
 }
-.pi-dialog-textarea {
+.llm-dialog-textarea {
 	min-height: 120px;
 	resize: vertical;
 }

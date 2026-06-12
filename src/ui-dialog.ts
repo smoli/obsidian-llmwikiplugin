@@ -68,9 +68,9 @@ class UIDialogModal extends Modal {
 
 	private renderSelect(): void {
 		const options = this.req.options ?? [];
-		const wrap = this.contentEl.createDiv({ cls: "pi-dialog-options" });
+		const wrap = this.contentEl.createDiv({ cls: "llm-dialog-options" });
 		for (const opt of options) {
-			const btn = wrap.createEl("button", { text: opt, cls: "pi-dialog-option" });
+			const btn = wrap.createEl("button", { text: opt, cls: "llm-dialog-option" });
 			btn.addEventListener("click", () => this.answer({ value: opt }));
 		}
 		new Setting(this.contentEl).addButton((b) =>
@@ -82,8 +82,8 @@ class UIDialogModal extends Modal {
 		const isEditor = this.req.method === "editor";
 		let value = (this.req.prefill as string) ?? "";
 		const input = isEditor
-			? this.contentEl.createEl("textarea", { cls: "pi-dialog-textarea" })
-			: this.contentEl.createEl("input", { type: "text", cls: "pi-dialog-input" });
+			? this.contentEl.createEl("textarea", { cls: "llm-dialog-textarea" })
+			: this.contentEl.createEl("input", { type: "text", cls: "llm-dialog-input" });
 		input.value = value;
 		if (this.req.placeholder) input.setAttribute("placeholder", String(this.req.placeholder));
 		input.addEventListener("input", () => (value = (input as HTMLInputElement | HTMLTextAreaElement).value));

@@ -46,7 +46,7 @@ export class PromptStore {
 	constructor(private app: App, private getFileName: () => string) {}
 
 	get fileName(): string {
-		const name = (this.getFileName() || "pi-agent-prompts.json").trim();
+		const name = (this.getFileName() || "llm-agent-prompts.json").trim();
 		return name.replace(/^[\\/]+/, "");
 	}
 
@@ -71,7 +71,7 @@ export class PromptStore {
 				await this.save();
 			}
 		} catch (err) {
-			console.error("[pi-agent] failed to read prompts file:", err);
+			console.error("[llm-agent] failed to read prompts file:", err);
 			// Keep whatever we had; don't clobber a malformed file by overwriting.
 		}
 		this.loaded = true;

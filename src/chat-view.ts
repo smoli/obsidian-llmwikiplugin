@@ -11,7 +11,7 @@ import {
 	setIcon,
 } from "obsidian";
 import { runCapture, runGit } from "./git";
-import type PiAgentPlugin from "./main";
+import type LlmAgentPlugin from "./main";
 import { AgentBackend, BackendEvent, BackendModel, NormalizedStats, PermissionRequest } from "./backend";
 import { PiBackend } from "./pi-backend";
 import { ClaudeBackend } from "./claude-backend";
@@ -19,7 +19,7 @@ import { ExtensionUIRequest, ThinkingLevel } from "./rpc-types";
 import { SavedSession, newSessionId } from "./sessions";
 import { showUIDialog } from "./ui-dialog";
 
-export const PI_VIEW_TYPE = "pi-agent-chat";
+export const VIEW_TYPE = "llm-agent-chat";
 
 interface ToolBlock {
 	root: HTMLElement;
@@ -28,7 +28,7 @@ interface ToolBlock {
 	titleEl: HTMLElement;
 }
 
-export class PiChatView extends ItemView {
+export class LlmChatView extends ItemView {
 	private backend: AgentBackend | null = null;
 	private models: BackendModel[] = [];
 
@@ -66,16 +66,16 @@ export class PiChatView extends ItemView {
 	private savedChatPath: string | null = null;
 	private savedChatStamp: { date: string; time: string } | null = null;
 
-	constructor(leaf: WorkspaceLeaf, private plugin: PiAgentPlugin) {
+	constructor(leaf: WorkspaceLeaf, private plugin: LlmAgentPlugin) {
 		super(leaf);
 	}
 
 	getViewType(): string {
-		return PI_VIEW_TYPE;
+		return VIEW_TYPE;
 	}
 
 	getDisplayText(): string {
-		return "Pi Agent";
+		return "LLM Agent";
 	}
 
 	getIcon(): string {
@@ -84,13 +84,13 @@ export class PiChatView extends ItemView {
 
 	async onOpen(): Promise<void> {
 		this.contentEl.empty();
-		this.contentEl.addClass("pi-agent-view");
+		this.contentEl.addClass("llm-agent-view");
 		this.session = this.makeSession();
 		this.buildHeader();
-		this.transcriptEl = this.contentEl.createDiv({ cls: "pi-transcript" });
-		this.quickBarEl = this.contentEl.createDiv({ cls: "pi-quickbar" });
+		this.transcriptEl = this.contentEl.createDiv({ cls: "llm-transcript" });
+		this.quickBarEl = this.contentEl.createDiv({ cls: "llm-quickbar" });
 		this.renderQuickPrompts();
-		this.contextEl = this.contentEl.createDiv({ cls: "pi-context" });
+		this.contextEl = this.contentEl.createDiv({ cls: "llm-context" });
 		this.contextEl.hide();
 		this.buildInput();
 		await this.connect();
@@ -104,19 +104,19 @@ export class PiChatView extends ItemView {
 	// ---------------------------------------------------------------- layout
 
 	private buildHeader(): void {
-		const header = this.contentEl.createDiv({ cls: "pi-header" });
+		const header = this.contentEl.createDiv({ cls: "llm-header" });
 
-		this.engineSelect = header.createEl("select", { cls: "pi-select pi-engine-select" });
+		this.engineSelect = header.createEl("select", { cls: "llm-select llm-engine-select" });
 		this.engineSelect.createEl("option", { text: "pi", value: "pi" });
 		this.engineSelect.createEl("option", { text: "Claude Code", value: "claude" });
 		this.engineSelect.value = this.plugin.settings.engine;
 		this.engineSelect.addEventListener("change", () => this.onEngineChange());
 
-		this.modelSelect = header.createEl("select", { cls: "pi-select pi-model-select" });
+		this.modelSelect = header.createEl("select", { cls: "llm-select llm-model-select" });
 		this.modelSelect.createEl("option", { text: "Loading models…", value: "" });
 		this.modelSelect.addEventListener("change", () => this.onModelChange());
 
-		this.thinkingSelect = header.createEl("select", { cls: "pi-select pi-thinking-select" });
+		this.thinkingSelect = header.createEl("select", { cls: "llm-select llm-thinking-select" });
 		for (const lvl of ["off", "minimal", "low", "medium", "high", "xhigh"]) {
 			this.thinkingSelect.createEl("option", { text: `🧠 ${lvl}`, value: lvl });
 		}
@@ -125,37 +125,37 @@ export class PiChatView extends ItemView {
 			if (this.backend?.running) await this.backend.setThinking(this.thinkingSelect.value as ThinkingLevel);
 		});
 
-		this.personaSelect = header.createEl("select", { cls: "pi-select pi-persona-select" });
+		this.personaSelect = header.createEl("select", { cls: "llm-select llm-persona-select" });
 		this.personaSelect.addEventListener("change", () => this.onPersonaChange());
 		this.renderPersonaSelect();
 
-		const spacer = header.createDiv({ cls: "pi-header-spacer" });
+		const spacer = header.createDiv({ cls: "llm-header-spacer" });
 		spacer.style.flex = "1";
 
-		const sessionsBtn = header.createEl("button", { cls: "pi-icon-btn", attr: { "aria-label": "Sessions" } });
+		const sessionsBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "Sessions" } });
 		setIcon(sessionsBtn, "history");
 		sessionsBtn.addEventListener("click", (e) => this.openSessionMenu(e));
 
-		const newBtn = header.createEl("button", { cls: "pi-icon-btn", attr: { "aria-label": "New session" } });
+		const newBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "New session" } });
 		setIcon(newBtn, "plus");
 		newBtn.addEventListener("click", () => this.startNewSession());
 
-		const saveBtn = header.createEl("button", { cls: "pi-icon-btn", attr: { "aria-label": "Save chat as Markdown" } });
+		const saveBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "Save chat as Markdown" } });
 		setIcon(saveBtn, "save");
 		saveBtn.addEventListener("click", () => this.saveChat());
 
-		this.stopBtn = header.createEl("button", { cls: "pi-icon-btn pi-stop-btn", attr: { "aria-label": "Stop" } });
+		this.stopBtn = header.createEl("button", { cls: "llm-icon-btn llm-stop-btn", attr: { "aria-label": "Stop" } });
 		setIcon(this.stopBtn, "square");
 		this.stopBtn.hide();
 		this.stopBtn.addEventListener("click", () => this.backend?.abort());
 
 		if (this.plugin.isGitRepo()) {
-			const gitBtn = header.createEl("button", { cls: "pi-icon-btn", attr: { "aria-label": "Git" } });
+			const gitBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "Git" } });
 			setIcon(gitBtn, "git-branch");
 			gitBtn.addEventListener("click", (e) => this.openGitMenu(e));
 		}
 
-		this.statusEl = this.contentEl.createDiv({ cls: "pi-status" });
+		this.statusEl = this.contentEl.createDiv({ cls: "llm-status" });
 	}
 
 	private async onEngineChange(): Promise<void> {
@@ -429,9 +429,9 @@ export class PiChatView extends ItemView {
 	}
 
 	private buildInput(): void {
-		const wrap = this.contentEl.createDiv({ cls: "pi-input-row" });
+		const wrap = this.contentEl.createDiv({ cls: "llm-input-row" });
 		this.inputEl = wrap.createEl("textarea", {
-			cls: "pi-input",
+			cls: "llm-input",
 			attr: { placeholder: "Ask the agent about your wiki… (Enter to send, Shift+Enter for newline)", rows: "3" },
 		});
 		this.inputEl.addEventListener("keydown", (e) => {
@@ -440,7 +440,7 @@ export class PiChatView extends ItemView {
 				this.onSend();
 			}
 		});
-		this.sendBtn = wrap.createEl("button", { cls: "pi-send-btn", text: "Send" });
+		this.sendBtn = wrap.createEl("button", { cls: "llm-send-btn", text: "Send" });
 		this.sendBtn.addEventListener("click", () => this.onSend());
 	}
 
@@ -459,7 +459,7 @@ export class PiChatView extends ItemView {
 		}
 		this.quickBarEl.show();
 		for (const p of prompts) {
-			const btn = this.quickBarEl.createEl("button", { cls: "pi-quick-btn", text: p.label });
+			const btn = this.quickBarEl.createEl("button", { cls: "llm-quick-btn", text: p.label });
 			if (p.prompt) btn.setAttribute("aria-label", p.prompt);
 			btn.addEventListener("click", () => {
 				if (!p.prompt.trim()) {
@@ -553,7 +553,7 @@ export class PiChatView extends ItemView {
 	}
 
 	private addReconnectNotice(): void {
-		const btn = this.statusEl.createEl("button", { text: "Reconnect", cls: "pi-reconnect-btn" });
+		const btn = this.statusEl.createEl("button", { text: "Reconnect", cls: "llm-reconnect-btn" });
 		btn.addEventListener("click", async () => {
 			this.teardownBackend();
 			await this.connect();
@@ -613,15 +613,15 @@ export class PiChatView extends ItemView {
 		}
 		this.contextEl.show();
 
-		const head = this.contextEl.createDiv({ cls: "pi-context-head" });
-		const icon = head.createSpan({ cls: "pi-context-icon" });
+		const head = this.contextEl.createDiv({ cls: "llm-context-head" });
+		const icon = head.createSpan({ cls: "llm-context-icon" });
 		setIcon(icon, ctx.selection ? "text-quote" : "file-text");
-		const pathEl = head.createSpan({ cls: "pi-context-path", text: ctx.pagePath });
+		const pathEl = head.createSpan({ cls: "llm-context-path", text: ctx.pagePath });
 		pathEl.setAttribute("aria-label", `Open ${ctx.pagePath}`);
 		pathEl.addEventListener("click", () => {
 			void this.app.workspace.openLinkText(ctx.pagePath, "", false);
 		});
-		const clear = head.createEl("button", { cls: "pi-context-clear", attr: { "aria-label": "Remove context" } });
+		const clear = head.createEl("button", { cls: "llm-context-clear", attr: { "aria-label": "Remove context" } });
 		setIcon(clear, "x");
 		clear.addEventListener("click", () => {
 			this.pendingContext = null;
@@ -629,7 +629,7 @@ export class PiChatView extends ItemView {
 		});
 
 		if (ctx.selection) {
-			this.contextEl.createDiv({ cls: "pi-context-body", text: ctx.selection });
+			this.contextEl.createDiv({ cls: "llm-context-body", text: ctx.selection });
 		}
 	}
 
@@ -937,9 +937,9 @@ export class PiChatView extends ItemView {
 	}
 
 	private showErrorBlock(text: string): void {
-		const block = this.appendBlock("pi-msg pi-msg-error");
-		block.createDiv({ cls: "pi-error-label", text: "error" });
-		block.createDiv({ cls: "pi-error-body", text });
+		const block = this.appendBlock("llm-msg llm-msg-error");
+		block.createDiv({ cls: "llm-error-label", text: "error" });
+		block.createDiv({ cls: "llm-error-body", text });
 		this.scrollToBottom(true);
 	}
 
@@ -960,8 +960,8 @@ export class PiChatView extends ItemView {
 		const block = this.toolBlocks.get(ev.id);
 		if (!block) return;
 		this.setToolBody(block, ev.text || (ev.isError ? "(error)" : "(done)"), ev.isError);
-		block.root.toggleClass("pi-tool-error", ev.isError);
-		const badge = block.titleEl.querySelector(".pi-tool-status");
+		block.root.toggleClass("llm-tool-error", ev.isError);
+		const badge = block.titleEl.querySelector(".llm-tool-status");
 		if (badge) badge.setText(ev.isError ? "error" : "done");
 	}
 
@@ -977,8 +977,8 @@ export class PiChatView extends ItemView {
 	/** Show the animated "agent is working" indicator at the bottom of the transcript. */
 	private showWorking(): void {
 		if (!this.workingEl) {
-			this.workingEl = this.transcriptEl.createDiv({ cls: "pi-working", attr: { "aria-label": "Working" } });
-			for (let i = 0; i < 3; i++) this.workingEl.createSpan({ cls: "pi-working-dot" });
+			this.workingEl = this.transcriptEl.createDiv({ cls: "llm-working", attr: { "aria-label": "Working" } });
+			for (let i = 0; i < 3; i++) this.workingEl.createSpan({ cls: "llm-working-dot" });
 		}
 		this.transcriptEl.appendChild(this.workingEl); // keep it last
 		this.scrollToBottom();
@@ -996,47 +996,47 @@ export class PiChatView extends ItemView {
 	}
 
 	private renderUserBlock(text: string): void {
-		const block = this.appendBlock("pi-msg pi-msg-user");
-		const body = block.createDiv({ cls: "pi-msg-body" });
+		const block = this.appendBlock("llm-msg llm-msg-user");
+		const body = block.createDiv({ cls: "llm-msg-body" });
 		this.renderMarkdownInto(body, text);
 		this.scrollToBottom(true);
 	}
 
 	private renderAssistantBlock(text: string): void {
-		const block = this.appendBlock("pi-msg pi-msg-assistant");
-		const body = block.createDiv({ cls: "pi-msg-body" });
+		const block = this.appendBlock("llm-msg llm-msg-assistant");
+		const body = block.createDiv({ cls: "llm-msg-body" });
 		this.renderMarkdownInto(body, text, true);
 		this.scrollToBottom();
 	}
 
 	private newAssistantTextBlock(): HTMLElement {
-		const block = this.appendBlock("pi-msg pi-msg-assistant");
-		const body = block.createDiv({ cls: "pi-msg-body" });
+		const block = this.appendBlock("llm-msg llm-msg-assistant");
+		const body = block.createDiv({ cls: "llm-msg-body" });
 		this.scrollToBottom();
 		return body;
 	}
 
 	private newThinkingBlock(): HTMLElement {
-		const block = this.appendBlock("pi-msg pi-msg-thinking");
-		block.createDiv({ cls: "pi-thinking-label", text: "thinking" });
-		const body = block.createEl("pre", { cls: "pi-thinking-body" });
+		const block = this.appendBlock("llm-msg llm-msg-thinking");
+		block.createDiv({ cls: "llm-thinking-label", text: "thinking" });
+		const body = block.createEl("pre", { cls: "llm-thinking-body" });
 		this.scrollToBottom();
 		return body;
 	}
 
 	private newToolBlock(toolName: string, args: any): ToolBlock {
-		const root = this.appendBlock("pi-tool");
-		const header = root.createDiv({ cls: "pi-tool-header" });
-		const titleEl = header.createDiv({ cls: "pi-tool-title" });
-		const icon = titleEl.createSpan({ cls: "pi-tool-icon" });
+		const root = this.appendBlock("llm-tool");
+		const header = root.createDiv({ cls: "llm-tool-header" });
+		const titleEl = header.createDiv({ cls: "llm-tool-title" });
+		const icon = titleEl.createSpan({ cls: "llm-tool-icon" });
 		setIcon(icon, this.toolIcon(toolName));
-		titleEl.createSpan({ cls: "pi-tool-name", text: toolName });
-		const argEl = titleEl.createSpan({ cls: "pi-tool-arg", text: this.summarizeArgs(toolName, args) });
+		titleEl.createSpan({ cls: "llm-tool-name", text: toolName });
+		const argEl = titleEl.createSpan({ cls: "llm-tool-arg", text: this.summarizeArgs(toolName, args) });
 		const full = this.fullArgs(args);
 		if (full) argEl.setAttribute("title", full);
-		titleEl.createSpan({ cls: "pi-tool-status", text: "running" });
+		titleEl.createSpan({ cls: "llm-tool-status", text: "running" });
 
-		const body = root.createEl("pre", { cls: "pi-tool-body" });
+		const body = root.createEl("pre", { cls: "llm-tool-body" });
 		body.hide();
 
 		header.addEventListener("click", () => {
@@ -1050,7 +1050,7 @@ export class PiChatView extends ItemView {
 	private setToolBody(block: ToolBlock, text: string, isError: boolean): void {
 		const trimmed = text.length > 20000 ? text.slice(0, 20000) + "\n… (truncated)" : text;
 		block.body.setText(trimmed);
-		block.body.toggleClass("pi-tool-body-error", isError);
+		block.body.toggleClass("llm-tool-body-error", isError);
 	}
 
 	private toolIcon(name: string): string {
@@ -1144,7 +1144,7 @@ export class PiChatView extends ItemView {
 	 * (visually distinct from wiki links). Clicking one sends it as the reply.
 	 */
 	private decorateOptions(root: HTMLElement): void {
-		if (!root.closest(".pi-msg-assistant")) return;
+		if (!root.closest(".llm-msg-assistant")) return;
 		if (!(root.textContent ?? "").trim().endsWith("?")) return;
 
 		const lists = root.querySelectorAll("ol");
@@ -1153,9 +1153,9 @@ export class PiChatView extends ItemView {
 		const items = Array.from(ol.children).filter((c) => c.tagName === "LI") as HTMLElement[];
 		if (items.length < 2) return;
 
-		ol.classList.add("pi-options");
+		ol.classList.add("llm-options");
 		for (const li of items) {
-			li.classList.add("pi-option");
+			li.classList.add("llm-option");
 			li.setAttribute("role", "button");
 			li.setAttribute("tabindex", "0");
 			const reply = (li.textContent ?? "").trim();
@@ -1171,9 +1171,9 @@ export class PiChatView extends ItemView {
 	}
 
 	private chooseOption(ol: HTMLElement, li: HTMLElement, reply: string): void {
-		if (ol.classList.contains("pi-options-answered")) return;
-		ol.classList.add("pi-options-answered");
-		li.classList.add("pi-option-selected");
+		if (ol.classList.contains("llm-options-answered")) return;
+		ol.classList.add("llm-options-answered");
+		li.classList.add("llm-option-selected");
 		void this.submitMessage(reply);
 	}
 
@@ -1192,7 +1192,7 @@ export class PiChatView extends ItemView {
 			acceptNode: (node: Node) => {
 				const parent = (node as Text).parentElement;
 				if (!parent) return NodeFilter.FILTER_REJECT;
-				if (parent.closest("pre, a, .pi-page-link, .pi-option")) return NodeFilter.FILTER_REJECT;
+				if (parent.closest("pre, a, .llm-page-link, .llm-option")) return NodeFilter.FILTER_REJECT;
 				if (!node.nodeValue || !/\.(md|markdown)\b/.test(node.nodeValue)) {
 					return NodeFilter.FILTER_REJECT;
 				}
@@ -1233,7 +1233,7 @@ export class PiChatView extends ItemView {
 
 	private createPageLink(label: string, dest: TFile): HTMLAnchorElement {
 		const a = document.createElement("a");
-		a.className = "pi-page-link";
+		a.className = "llm-page-link";
 		a.textContent = label;
 		a.setAttribute("href", dest.path);
 		a.setAttribute("aria-label", dest.path);
@@ -1401,7 +1401,7 @@ export class PiChatView extends ItemView {
 	private setStatus(text: string, isError = false): void {
 		this.statusEl.empty();
 		this.statusEl.setText(text);
-		this.statusEl.toggleClass("pi-status-error", isError);
+		this.statusEl.toggleClass("llm-status-error", isError);
 	}
 
 	private refreshSendState(): void {

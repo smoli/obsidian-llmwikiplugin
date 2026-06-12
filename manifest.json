@@ -1,9 +1,9 @@
 {
-	"id": "pi-agent",
-	"name": "Pi Agent",
+	"id": "llm-agent",
+	"name": "LLM Agent",
 	"version": "0.2.0",
 	"minAppVersion": "1.4.0",
-	"description": "Chat with the pi coding agent inside Obsidian. Pi reads, creates, and edits your wiki pages using the vault's AGENTS.md, with the model of your choice.",
+	"description": "Chat with a coding agent (pi or Claude Code) inside Obsidian. It reads, creates, and edits your wiki pages using the vault's AGENTS.md, with the engine and model of your choice.",
 	"author": "Stephan Smola",
 	"isDesktopOnly": true
 }

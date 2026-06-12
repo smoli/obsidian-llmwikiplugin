@@ -1,9 +1,9 @@
 import { App, Notice, PluginSettingTab, Setting } from "obsidian";
-import type PiAgentPlugin from "./main";
+import type LlmAgentPlugin from "./main";
 import { ThinkingLevel } from "./rpc-types";
 import { StandardPrompt, makeId } from "./prompts";
 
-export interface PiAgentSettings {
+export interface LlmAgentSettings {
 	/** Which agent engine to drive: pi or the Claude Code CLI. */
 	engine: "pi" | "claude";
 	/** Command or absolute path used to launch pi. */
@@ -60,7 +60,7 @@ export interface PiAgentSettings {
 	chatSaveFolder: string;
 }
 
-export const DEFAULT_SETTINGS: PiAgentSettings = {
+export const DEFAULT_SETTINGS: LlmAgentSettings = {
 	engine: "pi",
 	piPath: "pi",
 	workingDir: "",
@@ -70,7 +70,7 @@ export const DEFAULT_SETTINGS: PiAgentSettings = {
 	persistSession: true,
 	showThinking: false,
 	dialogPolicy: "ask",
-	promptsFile: "pi-agent-prompts.json",
+	promptsFile: "llm-agent-prompts.json",
 	claudePath: "claude",
 	claudePermissionMode: "bypassPermissions",
 	claudeModel: "default",
@@ -86,8 +86,8 @@ export const DEFAULT_SETTINGS: PiAgentSettings = {
 
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
 
-export class PiAgentSettingTab extends PluginSettingTab {
-	constructor(app: App, private plugin: PiAgentPlugin) {
+export class LlmAgentSettingTab extends PluginSettingTab {
+	constructor(app: App, private plugin: LlmAgentPlugin) {
 		super(app, plugin);
 	}
 
@@ -95,10 +95,10 @@ export class PiAgentSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		containerEl.createEl("h2", { text: "Pi Agent" });
+		containerEl.createEl("h2", { text: "LLM Agent" });
 		containerEl.createEl("p", {
 			text:
-				"Pi runs as a background process scoped to your vault. It reads the vault's AGENTS.md and can read, create, and edit your wiki pages. Restart the chat panel (or reopen it) after changing these settings.",
+				"The agent runs as a background process scoped to your vault. It reads the vault's AGENTS.md and can read, create, and edit your wiki pages. Restart the chat panel (or reopen it) after changing these settings.",
 			cls: "setting-item-description",
 		});
 
@@ -109,7 +109,7 @@ export class PiAgentSettingTab extends PluginSettingTab {
 				d.addOption("pi", "pi");
 				d.addOption("claude", "Claude Code");
 				d.setValue(this.plugin.settings.engine).onChange(async (v) => {
-					this.plugin.settings.engine = v as PiAgentSettings["engine"];
+					this.plugin.settings.engine = v as LlmAgentSettings["engine"];
 					await this.plugin.saveSettings();
 				});
 			});
@@ -207,7 +207,7 @@ export class PiAgentSettingTab extends PluginSettingTab {
 				d.addOption("allow", "Always allow");
 				d.addOption("block", "Always block");
 				d.setValue(this.plugin.settings.dialogPolicy).onChange(async (v) => {
-					this.plugin.settings.dialogPolicy = v as PiAgentSettings["dialogPolicy"];
+					this.plugin.settings.dialogPolicy = v as LlmAgentSettings["dialogPolicy"];
 					await this.plugin.saveSettings();
 				});
 			});
@@ -256,7 +256,7 @@ export class PiAgentSettingTab extends PluginSettingTab {
 				d.addOption("append", "Append (recommended)");
 				d.addOption("replace", "Replace");
 				d.setValue(this.plugin.settings.claudeAgentsMode).onChange(async (v) => {
-					this.plugin.settings.claudeAgentsMode = v as PiAgentSettings["claudeAgentsMode"];
+					this.plugin.settings.claudeAgentsMode = v as LlmAgentSettings["claudeAgentsMode"];
 					await this.plugin.saveSettings();
 				});
 			});
@@ -271,7 +271,7 @@ export class PiAgentSettingTab extends PluginSettingTab {
 				d.addOption("acceptEdits", "Auto-accept edits only");
 				d.addOption("default", "Ask me per tool");
 				d.setValue(this.plugin.settings.claudePermissionMode).onChange(async (v) => {
-					this.plugin.settings.claudePermissionMode = v as PiAgentSettings["claudePermissionMode"];
+					this.plugin.settings.claudePermissionMode = v as LlmAgentSettings["claudePermissionMode"];
 					await this.plugin.saveSettings();
 				});
 			});
@@ -343,7 +343,7 @@ export class PiAgentSettingTab extends PluginSettingTab {
 			.setDesc("Prompt sent to the agent. Use {{files}} for the list of new files and {{count}} for how many.")
 			.then((s) => {
 				const ta = s.controlEl.createEl("textarea", {
-					cls: "pi-prompt-text",
+					cls: "llm-prompt-text",
 					attr: { rows: "4" },
 				});
 				ta.value = this.plugin.settings.autoRunPrompt;
@@ -366,10 +366,10 @@ export class PiAgentSettingTab extends PluginSettingTab {
 			.setDesc("File name (relative to the vault root) where standard prompts are stored.")
 			.addText((t) =>
 				t
-					.setPlaceholder("pi-agent-prompts.json")
+					.setPlaceholder("llm-agent-prompts.json")
 					.setValue(this.plugin.settings.promptsFile)
 					.onChange(async (v) => {
-						this.plugin.settings.promptsFile = v.trim() || "pi-agent-prompts.json";
+						this.plugin.settings.promptsFile = v.trim() || "llm-agent-prompts.json";
 						await this.plugin.saveSettings();
 					})
 			)
@@ -383,7 +383,7 @@ export class PiAgentSettingTab extends PluginSettingTab {
 					})
 			);
 
-		const listEl = containerEl.createDiv({ cls: "pi-prompts-settings" });
+		const listEl = containerEl.createDiv({ cls: "llm-prompts-settings" });
 		void this.renderPromptList(listEl);
 	}
 
@@ -401,7 +401,7 @@ export class PiAgentSettingTab extends PluginSettingTab {
 		}
 
 		prompts.forEach((p, index) => {
-			const row = containerEl.createDiv({ cls: "pi-prompt-edit" });
+			const row = containerEl.createDiv({ cls: "llm-prompt-edit" });
 
 			new Setting(row)
 				.setName(`Prompt ${index + 1}`)
@@ -425,7 +425,7 @@ export class PiAgentSettingTab extends PluginSettingTab {
 				);
 
 			const ta = row.createEl("textarea", {
-				cls: "pi-prompt-text",
+				cls: "llm-prompt-text",
 				attr: { rows: "3", placeholder: "Prompt text sent to pi…" },
 			});
 			ta.value = p.prompt;
@@ -434,7 +434,7 @@ export class PiAgentSettingTab extends PluginSettingTab {
 			});
 		});
 
-		const actions = containerEl.createDiv({ cls: "pi-prompts-actions" });
+		const actions = containerEl.createDiv({ cls: "llm-prompts-actions" });
 
 		const addBtn = actions.createEl("button", { text: "Add prompt" });
 		addBtn.addEventListener("click", async () => {
