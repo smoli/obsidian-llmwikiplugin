@@ -128,9 +128,10 @@ export class ClaudeBackend extends BaseBackend implements AgentBackend {
 	/** One-line grounding so Claude knows the real vault root and stays inside it. */
 	private workspaceGrounding(cwd: string): string {
 		return (
-			`Your working directory is ${cwd}. It is the root of this Obsidian vault / wiki. ` +
-			`Every file you read, create, or edit lives inside this directory — always address files with paths relative to it (e.g. wiki/index.md). ` +
-			`Never read or write files outside this directory, and never use absolute paths from other machines or operating systems.`
+			`Your working directory is ${cwd}. It is the root of this Obsidian vault / wiki, and every file you read, create, or edit lives inside it. ` +
+			`Always address files with paths relative to this directory, using forward slashes and NO leading slash — for example "05-wiki/01-index.md", never "/05-wiki/01-index.md". ` +
+			`A leading "/" or "\\" is treated as an absolute filesystem path and will fail; never use leading slashes, backslashes, drive letters, or absolute paths. ` +
+			`Never read or write files outside this directory.`
 		);
 	}
 
