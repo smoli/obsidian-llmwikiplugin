@@ -169,7 +169,7 @@ export class PiChatView extends ItemView {
 		}
 
 		// Stage everything first so the suggested message covers all changes.
-		this.setStatus("Suggesting commit message…");
+		this.setStatus("Staging changes…");
 		const add = await runGit(cwd, ["add", "-A"]);
 		if (add.code !== 0) {
 			new Notice(`git add failed: ${add.stderr.trim()}`);
@@ -177,7 +177,11 @@ export class PiChatView extends ItemView {
 			return;
 		}
 
-		const suggestion = await this.suggestCommitMessage(cwd);
+		let suggestion = "";
+		if (this.plugin.settings.gitSuggestCommitMessage) {
+			this.setStatus("Suggesting commit message…");
+			suggestion = await this.suggestCommitMessage(cwd);
+		}
 
 		const req: ExtensionUIRequest = {
 			type: "extension_ui_request",
