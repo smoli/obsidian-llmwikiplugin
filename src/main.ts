@@ -4,6 +4,12 @@ import { DEFAULT_SETTINGS, PiAgentSettingTab, PiAgentSettings } from "./settings
 import { PromptStore } from "./prompts";
 import * as path from "path";
 import * as fs from "fs";
+import * as os from "os";
+
+export interface Persona {
+	path: string;
+	name: string;
+}
 
 export default class PiAgentPlugin extends Plugin {
 	declare settings: PiAgentSettings;
@@ -173,11 +179,61 @@ export default class PiAgentPlugin extends Plugin {
 	 * filesystem (pi cannot operate on it).
 	 */
 	getWorkingDir(): string | null {
-		const adapter = this.app.vault.adapter;
-		if (!(adapter instanceof FileSystemAdapter)) return null;
-		const base = adapter.getBasePath();
+		const base = this.getVaultBase();
+		if (!base) return null;
 		const sub = this.settings.workingDir?.trim();
 		return sub ? path.join(base, sub) : base;
+	}
+
+	/** Absolute path to the vault root, or null if the vault isn't on disk. */
+	getVaultBase(): string | null {
+		const adapter = this.app.vault.adapter;
+		return adapter instanceof FileSystemAdapter ? adapter.getBasePath() : null;
+	}
+
+	/** Markdown files in the vault root whose frontmatter has PERSONA: true. */
+	getPersonas(): Persona[] {
+		const out: Persona[] = [];
+		for (const f of this.app.vault.getMarkdownFiles()) {
+			if (f.path.includes("/")) continue; // root only
+			const fm = this.app.metadataCache.getFileCache(f)?.frontmatter as Record<string, unknown> | undefined;
+			if (!fm) continue;
+			const flag = fm.PERSONA ?? fm.persona;
+			if (flag === true || flag === "true") {
+				const name =
+					(typeof fm.name === "string" && fm.name) ||
+					(typeof fm.title === "string" && fm.title) ||
+					f.basename;
+				out.push({ path: f.path, name });
+			}
+		}
+		out.sort((a, b) => a.name.localeCompare(b.name));
+		return out;
+	}
+
+	/**
+	 * Resolve the currently selected persona to a temp file holding its content
+	 * with frontmatter stripped, suitable to pass as a system prompt. Returns null
+	 * when no (valid) persona is selected — callers then fall back to AGENTS.md.
+	 */
+	resolvePersonaPromptFile(): string | null {
+		const sel = this.settings.selectedPersona;
+		if (!sel) return null;
+		const base = this.getVaultBase();
+		if (!base) return null;
+		const abs = path.join(base, sel);
+		try {
+			if (!fs.existsSync(abs)) return null;
+			let content = fs.readFileSync(abs, "utf8");
+			content = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
+			if (!content) return null;
+			const slug = sel.replace(/[^a-zA-Z0-9]+/g, "-");
+			const tmp = path.join(os.tmpdir(), `pi-agent-persona-${slug}.md`);
+			fs.writeFileSync(tmp, content + "\n", "utf8");
+			return tmp;
+		} catch {
+			return null;
+		}
 	}
 
 	/** Reload prompts from the vault file and update any open panels. */

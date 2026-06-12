@@ -25,6 +25,8 @@ export interface PiClientOptions {
 	thinking?: ThinkingLevel;
 	/** Persist sessions to disk (false adds --no-session). */
 	persistSession: boolean;
+	/** File whose contents are appended to the system prompt (persona). */
+	appendSystemPromptFile?: string;
 	/** Extra environment variables merged over process.env. */
 	env?: Record<string, string>;
 }
@@ -66,6 +68,7 @@ export class PiClient extends EventEmitter {
 		if (this.opts.provider) args.push("--provider", this.opts.provider);
 		if (this.opts.model) args.push("--model", this.opts.model);
 		if (this.opts.thinking) args.push("--thinking", this.opts.thinking);
+		if (this.opts.appendSystemPromptFile) args.push("--append-system-prompt", this.opts.appendSystemPromptFile);
 
 		// On Windows the `pi` binary is a `.cmd` shim, which requires a shell to
 		// launch. Elsewhere we spawn directly.

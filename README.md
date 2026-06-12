@@ -110,6 +110,35 @@ Manage them two ways, both backed by the same file:
 Clicking a button sends its prompt immediately (and *steers* pi if it's already
 running). The file name is configurable in settings.
 
+## Personas
+
+By default the agent uses your vault's `AGENTS.md` as its system prompt.
+**Personas** let you swap in a different system prompt per session for more
+specific work (a reviewer, a brainstorming sparring partner, a translator, …).
+
+Create a markdown file **in the vault root** with `PERSONA: true` in its
+frontmatter:
+
+```markdown
+---
+PERSONA: true
+name: Sparringspartner
+---
+
+You are a critical sounding board. Question assumptions, offer counter-arguments…
+```
+
+A **persona dropdown** then appears in the panel header (it's hidden when no
+personas exist). Pick one and the session restarts using that persona's content
+(frontmatter stripped) as the system prompt **instead of AGENTS.md** — the agent
+still has full vault access. Pick *Default (AGENTS.md)* to go back. Your choice is
+remembered. `name:` (or `title:`) sets the display label; otherwise the file name
+is used.
+
+> For Claude Code the persona replaces the AGENTS.md prompt while keeping Claude's
+> built-in working-directory grounding. For pi the persona is appended to its
+> prompt (pi still auto-loads AGENTS.md from the vault root).
+
 ## Clickable options
 
 When the agent asks you to pick one of several choices — a message ending in a

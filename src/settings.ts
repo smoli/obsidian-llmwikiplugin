@@ -52,6 +52,9 @@ export interface PiAgentSettings {
 
 	/** Pre-fill the commit dialog with an engine-generated message. */
 	gitSuggestCommitMessage: boolean;
+
+	/** Vault-relative path of the selected persona file, or "" for AGENTS.md. */
+	selectedPersona: string;
 }
 
 export const DEFAULT_SETTINGS: PiAgentSettings = {
@@ -70,6 +73,7 @@ export const DEFAULT_SETTINGS: PiAgentSettings = {
 	claudeModel: "default",
 	claudeAgentsMode: "append",
 	gitSuggestCommitMessage: true,
+	selectedPersona: "",
 	autoRunEnabled: false,
 	autoRunFolder: "99-raw",
 	autoRunPrompt:

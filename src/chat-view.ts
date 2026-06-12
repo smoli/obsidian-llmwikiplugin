@@ -41,6 +41,7 @@ export class PiChatView extends ItemView {
 	private engineSelect!: HTMLSelectElement;
 	private modelSelect!: HTMLSelectElement;
 	private thinkingSelect!: HTMLSelectElement;
+	private personaSelect!: HTMLSelectElement;
 
 	// Streaming render state
 	private currentTextEl: HTMLElement | null = null;
@@ -113,6 +114,10 @@ export class PiChatView extends ItemView {
 			if (this.backend?.running) await this.backend.setThinking(this.thinkingSelect.value as ThinkingLevel);
 		});
 
+		this.personaSelect = header.createEl("select", { cls: "pi-select pi-persona-select" });
+		this.personaSelect.addEventListener("change", () => this.onPersonaChange());
+		this.renderPersonaSelect();
+
 		const spacer = header.createDiv({ cls: "pi-header-spacer" });
 		spacer.style.flex = "1";
 
@@ -141,6 +146,30 @@ export class PiChatView extends ItemView {
 		this.teardownBackend();
 		this.transcriptEl.empty();
 		await this.connect();
+	}
+
+	/** Populate the persona dropdown from vault-root persona files. */
+	private renderPersonaSelect(): void {
+		const personas = this.plugin.getPersonas();
+		this.personaSelect.empty();
+		this.personaSelect.createEl("option", { text: "Default (AGENTS.md)", value: "" });
+		for (const p of personas) {
+			this.personaSelect.createEl("option", { text: `🎭 ${p.name}`, value: p.path });
+		}
+		const sel = this.plugin.settings.selectedPersona;
+		this.personaSelect.value = personas.some((p) => p.path === sel) ? sel : "";
+		// Hide the control entirely when no personas exist.
+		this.personaSelect.toggle(personas.length > 0);
+	}
+
+	private async onPersonaChange(): Promise<void> {
+		this.plugin.settings.selectedPersona = this.personaSelect.value;
+		await this.plugin.saveSettings();
+		this.teardownBackend();
+		this.transcriptEl.empty();
+		await this.connect();
+		const name = this.personaSelect.selectedOptions[0]?.text ?? "Default";
+		this.setStatus(`Persona: ${name}`);
 	}
 
 	// ------------------------------------------------------------------- git
@@ -334,6 +363,10 @@ export class PiChatView extends ItemView {
 		const s = this.plugin.settings;
 		const engine = s.engine;
 		this.engineSelect.value = engine;
+		this.renderPersonaSelect();
+
+		// A selected persona replaces AGENTS.md as the system prompt for this session.
+		const personaFile = this.plugin.resolvePersonaPromptFile();
 
 		if (engine === "claude") {
 			this.backend = new ClaudeBackend({
@@ -341,7 +374,7 @@ export class PiChatView extends ItemView {
 				cwd,
 				model: s.claudeModel || "default",
 				permissionMode: s.claudePermissionMode,
-				agentsFile: this.plugin.getAgentsFile() ?? undefined,
+				agentsFile: personaFile ?? this.plugin.getAgentsFile() ?? undefined,
 				agentsMode: s.claudeAgentsMode,
 			});
 		} else {
@@ -352,6 +385,7 @@ export class PiChatView extends ItemView {
 				model: s.model || undefined,
 				thinking: s.thinking,
 				persistSession: s.persistSession,
+				appendSystemPromptFile: personaFile ?? undefined,
 			});
 		}
 
