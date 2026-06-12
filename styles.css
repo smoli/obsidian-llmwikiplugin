@@ -70,11 +70,17 @@
 
 .pi-transcript {
 	flex: 1;
+	min-height: 0;
 	overflow-y: auto;
 	padding: 10px;
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
+}
+/* Keep each message/tool row at its natural height — without this, the column
+   flexbox shrinks rows vertically as the transcript fills instead of scrolling. */
+.pi-transcript > * {
+	flex: 0 0 auto;
 }
 
 .pi-msg {
