@@ -1,11 +1,12 @@
 {
 	"name": "pi-agent-obsidian",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"description": "Obsidian plugin that embeds the pi coding agent as a chat panel operating on your vault.",
 	"main": "main.js",
 	"scripts": {
 		"dev": "node esbuild.config.mjs",
 		"build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+		"deploy": "node deploy.mjs",
 		"version": "node version-bump.mjs && git add manifest.json versions.json"
 	},
 	"keywords": [

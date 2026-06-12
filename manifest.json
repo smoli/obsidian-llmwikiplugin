@@ -1,7 +1,7 @@
 {
 	"id": "pi-agent",
 	"name": "Pi Agent",
-	"version": "0.1.0",
+	"version": "0.2.0",
 	"minAppVersion": "1.4.0",
 	"description": "Chat with the pi coding agent inside Obsidian. Pi reads, creates, and edits your wiki pages using the vault's AGENTS.md, with the model of your choice.",
 	"author": "Stephan Smola",

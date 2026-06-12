@@ -264,6 +264,14 @@ npm run dev      # watch build → main.js
 npm run build    # type-check + production bundle
 ```
 
+Deploy into a vault (builds, then copies `main.js`, `manifest.json`, `styles.css`
+into `<vault>/.obsidian/plugins/pi-agent/`):
+
+```
+npm run deploy -- "C:\path\to\your\vault"
+npm run deploy -- "C:\path\to\your\vault" --no-build   # copy existing build only
+```
+
 To test the raw RPC integration without Obsidian:
 
 ```
