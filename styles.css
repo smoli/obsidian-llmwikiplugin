@@ -201,6 +201,31 @@
 	color: var(--text-error);
 }
 
+/* ----- quick prompts ----- */
+
+.pi-quickbar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px;
+	padding: 8px 8px 0 8px;
+}
+.pi-quick-btn {
+	font-size: var(--font-ui-smaller);
+	padding: 3px 10px;
+	border-radius: var(--radius-s);
+	background: var(--interactive-normal);
+	border: 1px solid var(--background-modifier-border);
+	color: var(--text-normal);
+	cursor: pointer;
+	white-space: nowrap;
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.pi-quick-btn:hover {
+	background: var(--interactive-hover);
+}
+
 /* ----- input ----- */
 
 .pi-input-row {
@@ -221,6 +246,31 @@
 .pi-send-btn {
 	align-self: stretch;
 	padding: 0 14px;
+}
+
+/* ----- settings: prompt editor ----- */
+
+.pi-prompt-edit {
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	padding: 6px 10px 10px 10px;
+	margin-bottom: 10px;
+}
+.pi-prompt-edit .setting-item {
+	border-top: none;
+	padding-top: 4px;
+}
+.pi-prompt-text {
+	width: 100%;
+	resize: vertical;
+	min-height: 3.5em;
+	font-family: var(--font-monospace);
+	font-size: var(--font-ui-smaller);
+}
+.pi-prompts-actions {
+	display: flex;
+	gap: 8px;
+	margin-top: 4px;
 }
 
 /* ----- dialog modal ----- */

@@ -1,13 +1,25 @@
-import { FileSystemAdapter, Plugin, WorkspaceLeaf } from "obsidian";
+import { FileSystemAdapter, Plugin, TAbstractFile, WorkspaceLeaf } from "obsidian";
 import { PI_VIEW_TYPE, PiChatView } from "./chat-view";
 import { DEFAULT_SETTINGS, PiAgentSettingTab, PiAgentSettings } from "./settings";
+import { PromptStore } from "./prompts";
 import * as path from "path";
 
 export default class PiAgentPlugin extends Plugin {
 	declare settings: PiAgentSettings;
+	promptStore!: PromptStore;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
+
+		this.promptStore = new PromptStore(this.app, () => this.settings.promptsFile);
+		await this.promptStore.load();
+
+		// Live-reload standard prompts when the JSON file is edited in the vault.
+		this.registerEvent(
+			this.app.vault.on("modify", (file: TAbstractFile) => {
+				if (file.path === this.promptStore.fileName) void this.refreshPrompts();
+			})
+		);
 
 		this.registerView(PI_VIEW_TYPE, (leaf: WorkspaceLeaf) => new PiChatView(leaf, this));
 
@@ -61,6 +73,19 @@ export default class PiAgentPlugin extends Plugin {
 		const base = adapter.getBasePath();
 		const sub = this.settings.workingDir?.trim();
 		return sub ? path.join(base, sub) : base;
+	}
+
+	/** Reload prompts from the vault file and update any open panels. */
+	async refreshPrompts(): Promise<void> {
+		await this.promptStore.load();
+		this.refreshOpenViews();
+	}
+
+	/** Tell every open Pi panel to rebuild its quick-prompt bar. */
+	refreshOpenViews(): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(PI_VIEW_TYPE)) {
+			if (leaf.view instanceof PiChatView) leaf.view.reloadPrompts();
+		}
 	}
 
 	async loadSettings(): Promise<void> {

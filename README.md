@@ -54,6 +54,30 @@ Header controls:
 - **+** — start a fresh session.
 - **■** — stop the current run. Sending while pi is running *steers* it.
 
+### Standard prompts (one-click buttons)
+
+The bar above the input holds reusable prompts you can fire with a single click
+(e.g. *Lint wiki*, *Ingest raw/*, *Refresh index*). They are stored as JSON in a
+file at your **vault root** — `pi-agent-prompts.json` by default:
+
+```json
+{
+  "prompts": [
+    { "id": "lint", "label": "Lint wiki", "prompt": "Lint and audit the wiki…" }
+  ]
+}
+```
+
+Manage them two ways, both backed by the same file:
+
+- **Settings → Pi Agent → Standard prompts** — add, edit the label/text, delete,
+  and save.
+- **Edit the JSON file directly** in the vault — the panel buttons reload
+  automatically when the file changes.
+
+Clicking a button sends its prompt immediately (and *steers* pi if it's already
+running). The file name is configurable in settings.
+
 ## Settings
 
 | Setting | Description |
@@ -65,6 +89,7 @@ Header controls:
 | Persist sessions | Save conversations to pi's session store so they can be resumed. |
 | Show thinking | Display the agent's reasoning blocks. |
 | Tool permission dialogs | Ask / always allow / always block confirmation prompts pi raises. |
+| Prompts file | Vault-root JSON file holding the one-click standard prompts. |
 
 ## Development
 
