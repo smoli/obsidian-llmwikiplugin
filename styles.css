@@ -76,6 +76,11 @@
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
+	/* Obsidian disables text selection in side-panel views by default; re-enable
+	   it for the conversation so users can select and copy responses. */
+	user-select: text;
+	-webkit-user-select: text;
+	cursor: auto;
 }
 /* Keep each message/tool row at its natural height — without this, the column
    flexbox shrinks rows vertically as the transcript fills instead of scrolling. */
