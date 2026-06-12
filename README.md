@@ -67,6 +67,24 @@ Header controls:
 - **+** — start a fresh session.
 - **■** — stop the current run. Sending while pi is running *steers* it.
 
+### Git actions
+
+If your vault is a git repository, a **git** button (branch icon) appears in the
+header with:
+
+- **Commit all changes…** — stages everything, then opens a commit dialog
+  **pre-filled with a suggested message** that the selected engine generates from
+  the staged diff, following your AGENTS.md's commit format and language (e.g. it
+  writes the message in German if AGENTS.md asks for German). Edit it or accept it
+  and commit. Does nothing if there's nothing to commit.
+- **Commit & push…** — the above, then `git push`.
+- **Push** — `git push`.
+
+Useful when you made a quick change via chat that's too fine-grained for the
+agent to commit each time, or to push when you're ready. Git runs directly in the
+vault (credential prompts are disabled, so a push needing fresh credentials fails
+fast with a notice rather than hanging).
+
 ### Standard prompts (one-click buttons)
 
 The bar above the input holds reusable prompts you can fire with a single click
@@ -102,14 +120,19 @@ page.
 
 ## Ask about a selection
 
-Select text in any note (edit / live-preview mode), right-click, and choose
-**"Ask <engine> about selection"** (the label reflects your selected engine —
-"Ask pi…" or "Ask Claude Code…"; also available as the command *Ask the agent
-about selection*). This opens a fresh chat session and attaches the selected
-text and its page as a read-only **context chip above the input** (click the
-path to open the page, or the × to remove it). Type your question in the clean
-input box; the attached selection is prepended to your message when you send,
-then the chip clears. The agent still has full vault access, so it can pull in
+Right-click in a note (edit / live-preview mode):
+
+- **With text selected** → **"Ask <engine> about selection"** — attaches the
+  selection *and* its page.
+- **With nothing selected** → **"Ask <engine> about this page"** — attaches just
+  the page reference, so you can ask about the whole page.
+
+(The label reflects your selected engine — "Ask pi…" or "Ask Claude Code…"; also
+available as the command *Ask the agent about selection or page*.) This opens a
+fresh chat session and attaches the context as a read-only **chip above the
+input** (click the path to open the page, or the × to remove it). Type your
+question in the clean input box; the attached context is prepended to your
+message when you send, then the chip clears. The agent still has full vault access, so it can pull in
 anything else it needs to answer.
 
 ## Automation: run on new file

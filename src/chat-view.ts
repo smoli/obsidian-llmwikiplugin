@@ -2,12 +2,14 @@ import {
 	FileSystemAdapter,
 	ItemView,
 	MarkdownRenderer,
+	Menu,
 	Notice,
 	PaneType,
 	TFile,
 	WorkspaceLeaf,
 	setIcon,
 } from "obsidian";
+import { runCapture, runGit } from "./git";
 import type PiAgentPlugin from "./main";
 import { AgentBackend, BackendEvent, BackendModel, NormalizedStats, PermissionRequest } from "./backend";
 import { PiBackend } from "./pi-backend";
@@ -49,8 +51,9 @@ export class PiChatView extends ItemView {
 	private rafPending = false;
 	private streaming = false;
 
-	// Selection attached via "ask about selection", prepended to the next message.
-	private pendingContext: { pagePath: string; selection: string } | null = null;
+	// Page (and optional selection) attached via the "ask about" context menu,
+	// prepended to the next message.
+	private pendingContext: { pagePath: string; selection?: string } | null = null;
 
 	constructor(leaf: WorkspaceLeaf, private plugin: PiAgentPlugin) {
 		super(leaf);
@@ -121,6 +124,12 @@ export class PiChatView extends ItemView {
 		this.stopBtn.hide();
 		this.stopBtn.addEventListener("click", () => this.backend?.abort());
 
+		if (this.plugin.isGitRepo()) {
+			const gitBtn = header.createEl("button", { cls: "pi-icon-btn", attr: { "aria-label": "Git" } });
+			setIcon(gitBtn, "git-branch");
+			gitBtn.addEventListener("click", (e) => this.openGitMenu(e));
+		}
+
 		this.statusEl = this.contentEl.createDiv({ cls: "pi-status" });
 	}
 
@@ -131,6 +140,137 @@ export class PiChatView extends ItemView {
 		this.teardownBackend();
 		this.transcriptEl.empty();
 		await this.connect();
+	}
+
+	// ------------------------------------------------------------------- git
+
+	private openGitMenu(evt: MouseEvent): void {
+		const menu = new Menu();
+		menu.addItem((i) => i.setTitle("Commit all changes…").setIcon("check").onClick(() => void this.gitCommit(false)));
+		menu.addItem((i) => i.setTitle("Commit & push…").setIcon("git-branch").onClick(() => void this.gitCommit(true)));
+		menu.addItem((i) => i.setTitle("Push").setIcon("upload").onClick(() => void this.gitPush()));
+		menu.showAtMouseEvent(evt);
+	}
+
+	private async gitCommit(alsoPush: boolean): Promise<void> {
+		const cwd = this.plugin.getWorkingDir();
+		if (!cwd) return;
+
+		const status = await runGit(cwd, ["status", "--porcelain"]);
+		if (status.code !== 0) {
+			new Notice(`git: ${status.stderr.trim() || "status failed"}`);
+			return;
+		}
+		if (!status.stdout.trim()) {
+			new Notice("No changes to commit.");
+			if (alsoPush) await this.gitPush();
+			return;
+		}
+
+		// Stage everything first so the suggested message covers all changes.
+		this.setStatus("Suggesting commit message…");
+		const add = await runGit(cwd, ["add", "-A"]);
+		if (add.code !== 0) {
+			new Notice(`git add failed: ${add.stderr.trim()}`);
+			this.setStatus("Commit failed", true);
+			return;
+		}
+
+		const suggestion = await this.suggestCommitMessage(cwd);
+
+		const req: ExtensionUIRequest = {
+			type: "extension_ui_request",
+			id: "git-commit",
+			method: "editor",
+			title: "Commit message",
+			prefill: suggestion,
+			placeholder: "Describe the change",
+		};
+		const answer = await showUIDialog(this.app, req);
+		if (answer.cancelled) {
+			this.setStatus("Commit cancelled (changes left staged).");
+			return;
+		}
+		const msg = (typeof answer.value === "string" && answer.value.trim()) || suggestion.trim() || "Update from Obsidian";
+
+		this.setStatus("Committing…");
+		const commit = await runGit(cwd, ["commit", "-m", msg]);
+		if (commit.code !== 0) {
+			new Notice(`git commit failed: ${commit.stderr.trim() || commit.stdout.trim()}`);
+			this.setStatus("Commit failed", true);
+			return;
+		}
+		new Notice("Committed.");
+		this.setStatus(commit.stdout.split("\n").find((l) => l.trim()) ?? "Committed.");
+		if (alsoPush) await this.gitPush();
+	}
+
+	/** Ask the selected engine for a commit message based on the staged diff + AGENTS.md. */
+	private async suggestCommitMessage(cwd: string): Promise<string> {
+		try {
+			const stat = await runGit(cwd, ["diff", "--cached", "--stat"]);
+			const diff = await runGit(cwd, ["diff", "--cached"]);
+			let changes = `${stat.stdout}\n\n${diff.stdout}`.trim();
+			if (changes.length > 6000) changes = changes.slice(0, 6000) + "\n...(truncated)";
+
+			const agents = this.plugin.getAgentsContent();
+			const prompt =
+				(agents
+					? `The repository's AGENTS.md (follow its commit-message format and the language it requires):\n\n${agents}\n\n`
+					: "") +
+				`Staged git changes:\n\n${changes}\n\n` +
+				`Write a git commit message for these changes. Follow the commit-message conventions and the language defined in AGENTS.md. Output ONLY the commit message text — no quotes, no preamble, no code fences.`;
+
+			const out = await this.runEngineOneShot(prompt);
+			return this.sanitizeMessage(out);
+		} catch {
+			return "";
+		}
+	}
+
+	/** Run the selected engine in non-interactive print mode for a one-shot reply. */
+	private async runEngineOneShot(prompt: string): Promise<string> {
+		const s = this.plugin.settings;
+		const cwd = this.plugin.getWorkingDir();
+		if (!cwd) return "";
+
+		let cmd: string;
+		let args: string[];
+		if (s.engine === "claude") {
+			cmd = s.claudePath;
+			// A small fast model is plenty for a commit message and keeps the popup snappy.
+			args = ["-p", "--output-format", "text", "--model", "haiku"];
+		} else {
+			cmd = s.piPath;
+			args = ["-p", "--no-session", "-nt"];
+			if (s.provider) args.push("--provider", s.provider);
+			if (s.model) args.push("--model", s.model);
+		}
+		const res = await runCapture(cmd, args, prompt, cwd, 60_000);
+		return res.code === 0 ? res.stdout : "";
+	}
+
+	private sanitizeMessage(s: string): string {
+		let t = (s || "").trim();
+		t = t.replace(/^```[a-zA-Z]*\s*/, "").replace(/```$/, "").trim();
+		if ((t.startsWith('"') && t.endsWith('"')) || (t.startsWith("'") && t.endsWith("'"))) {
+			t = t.slice(1, -1).trim();
+		}
+		return t;
+	}
+
+	private async gitPush(): Promise<void> {
+		const cwd = this.plugin.getWorkingDir();
+		if (!cwd) return;
+		this.setStatus("Pushing…");
+		const res = await runGit(cwd, ["push"]);
+		if (res.code !== 0) {
+			new Notice(`git push failed: ${res.stderr.trim() || res.stdout.trim() || "push failed"}`);
+			this.setStatus("Push failed", true);
+			return;
+		}
+		new Notice("Pushed.");
+		this.setStatus("Pushed.");
 	}
 
 	private buildInput(): void {
@@ -276,26 +416,32 @@ export class PiChatView extends ItemView {
 	}
 
 	/**
-	 * Open a fresh session and attach a page selection as immutable context shown
-	 * above the input. The context is prepended to the user's next message. The
-	 * agent still has full vault access (it runs in the vault root).
+	 * Open a fresh session and attach a page (and optional selection) as immutable
+	 * context shown above the input. The context is prepended to the user's next
+	 * message. The agent still has full vault access (it runs in the vault root).
 	 */
-	async seedFromSelection(pagePath: string, selection: string): Promise<void> {
+	async seedContext(pagePath: string, selection?: string): Promise<void> {
 		await this.ensureRunning();
 		// Only reset if there's already a conversation; a just-opened panel is fresh.
 		if (this.transcriptEl.childElementCount > 0) {
 			await this.startNewSession();
 		}
-		this.pendingContext = { pagePath, selection: selection.replace(/\r\n/g, "\n").trim() };
+		const sel = selection ? selection.replace(/\r\n/g, "\n").trim() : undefined;
+		this.pendingContext = { pagePath, selection: sel || undefined };
 		this.renderPendingContext();
 		this.inputEl.value = "";
 		this.inputEl.focus();
-		this.setStatus(`Context from ${pagePath} attached — type your question.`);
+		this.setStatus(
+			sel
+				? `Context from ${pagePath} attached — type your question.`
+				: `Page ${pagePath} attached — type your question.`
+		);
 	}
 
 	private renderPendingContext(): void {
 		this.contextEl.empty();
-		if (!this.pendingContext) {
+		const ctx = this.pendingContext;
+		if (!ctx) {
 			this.contextEl.hide();
 			return;
 		}
@@ -303,11 +449,11 @@ export class PiChatView extends ItemView {
 
 		const head = this.contextEl.createDiv({ cls: "pi-context-head" });
 		const icon = head.createSpan({ cls: "pi-context-icon" });
-		setIcon(icon, "text-quote");
-		const pathEl = head.createSpan({ cls: "pi-context-path", text: this.pendingContext.pagePath });
-		pathEl.setAttribute("aria-label", `Open ${this.pendingContext.pagePath}`);
+		setIcon(icon, ctx.selection ? "text-quote" : "file-text");
+		const pathEl = head.createSpan({ cls: "pi-context-path", text: ctx.pagePath });
+		pathEl.setAttribute("aria-label", `Open ${ctx.pagePath}`);
 		pathEl.addEventListener("click", () => {
-			if (this.pendingContext) void this.app.workspace.openLinkText(this.pendingContext.pagePath, "", false);
+			void this.app.workspace.openLinkText(ctx.pagePath, "", false);
 		});
 		const clear = head.createEl("button", { cls: "pi-context-clear", attr: { "aria-label": "Remove context" } });
 		setIcon(clear, "x");
@@ -316,7 +462,9 @@ export class PiChatView extends ItemView {
 			this.renderPendingContext();
 		});
 
-		this.contextEl.createDiv({ cls: "pi-context-body", text: this.pendingContext.selection });
+		if (ctx.selection) {
+			this.contextEl.createDiv({ cls: "pi-context-body", text: ctx.selection });
+		}
 	}
 
 	private async startNewSession(): Promise<void> {
@@ -386,14 +534,19 @@ export class PiChatView extends ItemView {
 			return;
 		}
 
-		// Fold any attached selection context into this message, then clear the chip.
+		// Fold any attached page/selection context into this message, then clear it.
 		let message = text;
 		if (this.pendingContext) {
-			const quoted = this.pendingContext.selection
-				.split("\n")
-				.map((l) => `> ${l}`)
-				.join("\n");
-			message = `Regarding \`${this.pendingContext.pagePath}\`, this selection:\n\n${quoted}\n\n${text}`;
+			const ctx = this.pendingContext;
+			if (ctx.selection) {
+				const quoted = ctx.selection
+					.split("\n")
+					.map((l) => `> ${l}`)
+					.join("\n");
+				message = `Regarding \`${ctx.pagePath}\`, this selection:\n\n${quoted}\n\n${text}`;
+			} else {
+				message = `Regarding the page \`${ctx.pagePath}\`:\n\n${text}`;
+			}
 			this.pendingContext = null;
 			this.renderPendingContext();
 		}

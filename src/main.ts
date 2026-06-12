@@ -49,28 +49,28 @@ export default class PiAgentPlugin extends Plugin {
 
 		this.addCommand({
 			id: "pi-agent-ask-about-selection",
-			name: "Ask the agent about selection",
+			name: "Ask the agent about selection or page",
 			editorCallback: (editor: Editor, info: MarkdownFileInfo) => {
 				const selection = editor.getSelection();
-				if (!selection || !selection.trim()) {
-					new Notice("Select some text first.");
-					return;
-				}
-				void this.askAboutSelection(info.file ?? null, selection);
+				const sel = selection && selection.trim() ? selection : undefined;
+				void this.askAbout(info.file ?? null, sel);
 			},
 		});
 
-		// Right-click context menu entry when text is selected in a note. The label
-		// reflects the currently selected engine (pi / Claude Code).
+		// Right-click context menu entry: "about selection" when text is selected,
+		// otherwise "about this page". The label reflects the active engine.
 		this.registerEvent(
 			this.app.workspace.on("editor-menu", (menu: Menu, editor: Editor, info: MarkdownFileInfo) => {
 				const selection = editor.getSelection();
-				if (!selection || !selection.trim()) return;
+				const sel = selection && selection.trim() ? selection : undefined;
+				const file = info.file ?? null;
+				if (!sel && !file) return;
+				const target = sel ? "selection" : "this page";
 				menu.addItem((item) =>
 					item
-						.setTitle(`Ask ${this.engineLabel()} about selection`)
+						.setTitle(`Ask ${this.engineLabel()} about ${target}`)
 						.setIcon("bot")
-						.onClick(() => this.askAboutSelection(info.file ?? null, selection))
+						.onClick(() => this.askAbout(file, sel))
 				);
 			})
 		);
@@ -154,12 +154,16 @@ export default class PiAgentPlugin extends Plugin {
 		return this.settings.engine === "claude" ? "Claude Code" : "pi";
 	}
 
-	/** Open the panel and seed a fresh session with a page selection to ask about. */
-	private async askAboutSelection(file: TFile | null, selection: string): Promise<void> {
+	/** Open the panel and seed a fresh session with a page (and optional selection). */
+	private async askAbout(file: TFile | null, selection?: string): Promise<void> {
+		if (!file && !selection) {
+			new Notice("Open a note or select some text first.");
+			return;
+		}
 		const pagePath = file ? this.toAgentPath(file.path) : "(unknown page)";
 		const leaf = await this.activateView();
 		if (leaf?.view instanceof PiChatView) {
-			await leaf.view.seedFromSelection(pagePath, selection);
+			await leaf.view.seedContext(pagePath, selection);
 		}
 	}
 
@@ -189,6 +193,17 @@ export default class PiAgentPlugin extends Plugin {
 		}
 	}
 
+	/** Whether the working directory is (inside) a git repository. */
+	isGitRepo(): boolean {
+		const cwd = this.getWorkingDir();
+		if (!cwd) return false;
+		try {
+			return fs.existsSync(path.join(cwd, ".git"));
+		} catch {
+			return false;
+		}
+	}
+
 	/** Absolute path to the working directory's AGENTS.md, if it exists. */
 	getAgentsFile(): string | null {
 		const cwd = this.getWorkingDir();
@@ -198,6 +213,17 @@ export default class PiAgentPlugin extends Plugin {
 			return fs.existsSync(p) ? p : null;
 		} catch {
 			return null;
+		}
+	}
+
+	/** Contents of the working directory's AGENTS.md, or "" if absent. */
+	getAgentsContent(): string {
+		const p = this.getAgentsFile();
+		if (!p) return "";
+		try {
+			return fs.readFileSync(p, "utf8");
+		} catch {
+			return "";
 		}
 	}
 
