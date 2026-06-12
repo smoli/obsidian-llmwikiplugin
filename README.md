@@ -1,7 +1,7 @@
-# Pi Agent for Obsidian
+# LLM Agent for Obsidian
 
 Chat with the [pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
-in a side panel inside Obsidian. Pi runs scoped to your vault, reads the vault's
+in a side panel inside Obsidian. The agent runs scoped to your vault, reads the vault's
 `AGENTS.md`, and can **read, create, and edit your wiki pages** — driven by the
 LLM of your choice.
 
@@ -55,9 +55,9 @@ You only need the engine(s) you intend to use.
 ## Usage
 
 1. Open the panel via the ribbon **bot** icon or the command
-   *"Open Pi Agent panel"*.
+   *"Open LLM Agent panel"*.
 2. Pick your model and thinking level in the panel header.
-3. Ask away. Pi can answer questions about the wiki and make edits, e.g.
+3. Ask away. The agent can answer questions about the wiki and make edits, e.g.
    *"Ingest the new PDF in raw/ and update the wiki per AGENTS.md."*
 
 Header controls:
@@ -103,7 +103,7 @@ fast with a notice rather than hanging).
 
 The bar above the input holds reusable prompts you can fire with a single click
 (e.g. *Lint wiki*, *Ingest raw/*, *Refresh index*). They are stored as JSON in a
-file at your **vault root** — `pi-agent-prompts.json` by default:
+file at your **vault root** — `llm-agent-prompts.json` by default:
 
 ```json
 {
@@ -115,7 +115,7 @@ file at your **vault root** — `pi-agent-prompts.json` by default:
 
 Manage them two ways, both backed by the same file:
 
-- **Settings → Pi Agent → Standard prompts** — add, edit the label/text, delete,
+- **Settings → LLM Agent → Standard prompts** — add, edit the label/text, delete,
   and save.
 - **Edit the JSON file directly** in the vault — the panel buttons reload
   automatically when the file changes.
@@ -221,7 +221,7 @@ anything else it needs to answer.
 The plugin can watch a folder and automatically run a prompt whenever a new file
 lands in it — e.g. drop a PDF into your raw folder and have the agent ingest it.
 
-Enable it under **Settings → Pi Agent → Automation**:
+Enable it under **Settings → LLM Agent → Automation**:
 
 - **Run on new file in folder** — master toggle (off by default).
 - **Watch folder** — vault-relative folder to watch (default `99-raw`).
@@ -265,7 +265,7 @@ npm run build    # type-check + production bundle
 ```
 
 Deploy into a vault (builds, then copies `main.js`, `manifest.json`, `styles.css`
-into `<vault>/.obsidian/plugins/pi-agent/`):
+into `<vault>/.obsidian/plugins/llm-agent/`):
 
 ```
 npm run deploy -- "C:\path\to\your\vault"
@@ -279,7 +279,7 @@ node scripts/rpc-smoke.mjs "C:\path\to\your\vault"
 ```
 
 Deploy by copying `main.js`, `manifest.json`, and `styles.css` into
-`<vault>/.obsidian/plugins/pi-agent/`, then enable the plugin.
+`<vault>/.obsidian/plugins/llm-agent/`, then enable the plugin.
 
 ## Notes & troubleshooting
 
