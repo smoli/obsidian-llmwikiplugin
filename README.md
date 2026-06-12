@@ -72,11 +72,12 @@ Header controls:
 If your vault is a git repository, a **git** button (branch icon) appears in the
 header with:
 
-- **Commit all changes…** — stages everything, then opens a commit dialog
-  **pre-filled with a suggested message** that the selected engine generates from
-  the staged diff, following your AGENTS.md's commit format and language (e.g. it
-  writes the message in German if AGENTS.md asks for German). Edit it or accept it
-  and commit. Does nothing if there's nothing to commit.
+- **Commit all changes…** — stages everything, then opens a commit dialog. By
+  default it's **pre-filled with a suggested message** that the selected engine
+  generates from the staged diff, following your AGENTS.md's commit format and
+  language (e.g. it writes the message in German if AGENTS.md asks for German) —
+  edit or accept it. Turn this off under *Settings → Git → Suggest commit
+  messages* for an empty dialog. Does nothing if there's nothing to commit.
 - **Commit & push…** — the above, then `git push`.
 - **Push** — `git push`.
 
