@@ -92,6 +92,10 @@ export class ClaudeBackend extends BaseBackend implements AgentBackend {
 		];
 		if (this.model && this.model !== "default") args.push("--model", this.model);
 		if (o.agentsFile) args.push("--system-prompt-file", o.agentsFile);
+		// --system-prompt-file replaces Claude Code's default prompt, including its
+		// environment grounding (the real cwd). Re-add that grounding so Claude
+		// stays inside the vault instead of inventing an absolute base path.
+		args.push("--append-system-prompt", this.workspaceGrounding(o.cwd));
 		if (resume && this.sessionId) args.push("--resume", this.sessionId);
 
 		// .exe can be spawned directly; a bare command / .cmd shim needs a shell on Windows.
@@ -119,6 +123,15 @@ export class ClaudeBackend extends BaseBackend implements AgentBackend {
 			if (this.disposed) return;
 			this.emit("exit", code ?? (signal ? 1 : 0));
 		});
+	}
+
+	/** One-line grounding so Claude knows the real vault root and stays inside it. */
+	private workspaceGrounding(cwd: string): string {
+		return (
+			`Your working directory is ${cwd}. It is the root of this Obsidian vault / wiki. ` +
+			`Every file you read, create, or edit lives inside this directory — always address files with paths relative to it (e.g. wiki/index.md). ` +
+			`Never read or write files outside this directory, and never use absolute paths from other machines or operating systems.`
+		);
 	}
 
 	private killProc(): void {
