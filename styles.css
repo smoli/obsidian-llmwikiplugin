@@ -205,6 +205,40 @@ code .pi-page-link {
 	opacity: 0.5;
 }
 
+/* ----- working indicator ----- */
+
+.pi-working {
+	display: flex;
+	align-items: center;
+	gap: 5px;
+	padding: 8px 12px;
+}
+.pi-working-dot {
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background: var(--text-muted);
+	animation: pi-bounce 1.2s infinite ease-in-out both;
+}
+.pi-working-dot:nth-child(1) {
+	animation-delay: -0.24s;
+}
+.pi-working-dot:nth-child(2) {
+	animation-delay: -0.12s;
+}
+@keyframes pi-bounce {
+	0%,
+	80%,
+	100% {
+		transform: scale(0.6);
+		opacity: 0.4;
+	}
+	40% {
+		transform: scale(1);
+		opacity: 1;
+	}
+}
+
 /* ----- tool blocks ----- */
 
 .pi-tool {

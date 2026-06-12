@@ -50,6 +50,7 @@ export class PiChatView extends ItemView {
 	private toolBlocks = new Map<string, ToolBlock>();
 	private rafPending = false;
 	private streaming = false;
+	private workingEl: HTMLElement | null = null;
 
 	// Page (and optional selection) attached via the "ask about" context menu,
 	// prepended to the next message.
@@ -357,6 +358,7 @@ export class PiChatView extends ItemView {
 		backend.on("error", (err: Error) => this.setStatus(`${backend.engineName} error: ${err.message}`, true));
 		backend.on("exit", (code: number | null) => {
 			this.streaming = false;
+			this.hideWorking();
 			this.refreshSendState();
 			const tail = this.backend?.lastStderr;
 			this.setStatus(
@@ -552,14 +554,17 @@ export class PiChatView extends ItemView {
 		}
 
 		this.appendUserMessage(message);
+		this.showWorking();
 
 		try {
 			const res = await this.backend.prompt(message, this.streaming);
 			if (!res.ok) {
+				this.hideWorking();
 				if (this.streaming) new Notice(res.error ?? "Message rejected.");
 				else this.setStatus(res.error ?? "Prompt rejected.", true);
 			}
 		} catch (err: any) {
+			this.hideWorking();
 			this.setStatus(`Send failed: ${err?.message ?? err}`, true);
 		}
 	}
@@ -571,6 +576,7 @@ export class PiChatView extends ItemView {
 			case "run-start":
 				this.streaming = true;
 				this.resetStreamState();
+				this.showWorking();
 				this.refreshSendState();
 				break;
 
@@ -608,6 +614,7 @@ export class PiChatView extends ItemView {
 
 			case "run-end":
 				this.streaming = false;
+				this.hideWorking();
 				this.finalizeText();
 				this.finalizeThinking();
 				this.refreshSendState();
@@ -615,6 +622,7 @@ export class PiChatView extends ItemView {
 				break;
 
 			case "error":
+				this.hideWorking();
 				this.finalizeText();
 				this.finalizeThinking();
 				this.showErrorBlock(this.formatAssistantError(undefined, ev.message));
@@ -650,7 +658,7 @@ export class PiChatView extends ItemView {
 	}
 
 	private showErrorBlock(text: string): void {
-		const block = this.transcriptEl.createDiv({ cls: "pi-msg pi-msg-error" });
+		const block = this.appendBlock("pi-msg pi-msg-error");
 		block.createDiv({ cls: "pi-error-label", text: "error" });
 		block.createDiv({ cls: "pi-error-body", text });
 		this.scrollToBottom(true);
@@ -680,22 +688,44 @@ export class PiChatView extends ItemView {
 
 	// --------------------------------------------------------- DOM builders
 
+	/** Append a transcript block, keeping it above the working indicator if shown. */
+	private appendBlock(cls: string): HTMLElement {
+		const el = this.transcriptEl.createDiv({ cls });
+		if (this.workingEl) this.transcriptEl.insertBefore(el, this.workingEl);
+		return el;
+	}
+
+	/** Show the animated "agent is working" indicator at the bottom of the transcript. */
+	private showWorking(): void {
+		if (!this.workingEl) {
+			this.workingEl = this.transcriptEl.createDiv({ cls: "pi-working", attr: { "aria-label": "Working" } });
+			for (let i = 0; i < 3; i++) this.workingEl.createSpan({ cls: "pi-working-dot" });
+		}
+		this.transcriptEl.appendChild(this.workingEl); // keep it last
+		this.scrollToBottom();
+	}
+
+	private hideWorking(): void {
+		this.workingEl?.remove();
+		this.workingEl = null;
+	}
+
 	private appendUserMessage(text: string): void {
-		const block = this.transcriptEl.createDiv({ cls: "pi-msg pi-msg-user" });
+		const block = this.appendBlock("pi-msg pi-msg-user");
 		const body = block.createDiv({ cls: "pi-msg-body" });
 		this.renderMarkdownInto(body, text);
 		this.scrollToBottom(true);
 	}
 
 	private newAssistantTextBlock(): HTMLElement {
-		const block = this.transcriptEl.createDiv({ cls: "pi-msg pi-msg-assistant" });
+		const block = this.appendBlock("pi-msg pi-msg-assistant");
 		const body = block.createDiv({ cls: "pi-msg-body" });
 		this.scrollToBottom();
 		return body;
 	}
 
 	private newThinkingBlock(): HTMLElement {
-		const block = this.transcriptEl.createDiv({ cls: "pi-msg pi-msg-thinking" });
+		const block = this.appendBlock("pi-msg pi-msg-thinking");
 		block.createDiv({ cls: "pi-thinking-label", text: "thinking" });
 		const body = block.createEl("pre", { cls: "pi-thinking-body" });
 		this.scrollToBottom();
@@ -703,7 +733,7 @@ export class PiChatView extends ItemView {
 	}
 
 	private newToolBlock(toolName: string, args: any): ToolBlock {
-		const root = this.transcriptEl.createDiv({ cls: "pi-tool" });
+		const root = this.appendBlock("pi-tool");
 		const header = root.createDiv({ cls: "pi-tool-header" });
 		const titleEl = header.createDiv({ cls: "pi-tool-title" });
 		const icon = titleEl.createSpan({ cls: "pi-tool-icon" });
@@ -973,6 +1003,7 @@ export class PiChatView extends ItemView {
 		this.currentThinkingEl = null;
 		this.currentThinking = "";
 		this.toolBlocks.clear();
+		this.hideWorking();
 	}
 
 	// ------------------------------------------------------- dialogs / perms
