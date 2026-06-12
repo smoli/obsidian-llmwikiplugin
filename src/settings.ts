@@ -189,7 +189,7 @@ export class PiAgentSettingTab extends PluginSettingTab {
 		containerEl.createEl("h3", { text: "Claude Code" });
 		containerEl.createEl("p", {
 			text:
-				"Used when the engine is set to Claude Code. Claude reads your vault's AGENTS.md (injected as an appended system prompt) and operates on files in the working directory.",
+				"Used when the engine is set to Claude Code. Claude reads your vault's AGENTS.md (passed via --system-prompt-file) and operates on files in the working directory.",
 			cls: "setting-item-description",
 		});
 

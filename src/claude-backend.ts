@@ -17,7 +17,7 @@ export interface ClaudeBackendOptions {
 	model?: string;
 	/** acceptEdits | bypassPermissions | default | plan */
 	permissionMode: string;
-	/** Absolute path to AGENTS.md to inject as an appended system prompt. */
+	/** Absolute path to AGENTS.md, passed via --system-prompt-file. */
 	agentsFile?: string;
 	env?: Record<string, string>;
 }
@@ -91,7 +91,7 @@ export class ClaudeBackend extends BaseBackend implements AgentBackend {
 			o.permissionMode,
 		];
 		if (this.model && this.model !== "default") args.push("--model", this.model);
-		if (o.agentsFile) args.push("--append-system-prompt-file", o.agentsFile);
+		if (o.agentsFile) args.push("--system-prompt-file", o.agentsFile);
 		if (resume && this.sessionId) args.push("--resume", this.sessionId);
 
 		// .exe can be spawned directly; a bare command / .cmd shim needs a shell on Windows.
