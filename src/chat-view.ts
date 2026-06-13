@@ -724,6 +724,15 @@ export class LlmChatView extends ItemView {
 		menu.addSeparator();
 		menu.addItem((i) => i.setTitle("Rename current…").setIcon("pencil").onClick(() => void this.renameCurrentSession()));
 		menu.addItem((i) => i.setTitle("Delete current").setIcon("trash").onClick(() => void this.deleteCurrentSession()));
+		const others = sessions.filter((s) => s.id !== this.session.id).length;
+		if (others > 0) {
+			menu.addItem((i) =>
+				i
+					.setTitle("Delete all other sessions")
+					.setIcon("trash-2")
+					.onClick(() => void this.deleteOtherSessions())
+			);
+		}
 		menu.showAtMouseEvent(evt);
 	}
 
@@ -749,6 +758,26 @@ export class LlmChatView extends ItemView {
 		this.plugin.sessionStore.remove(this.session.id);
 		await this.startFreshSession();
 		this.setStatus("Session deleted.");
+	}
+
+	/** Delete every saved session except the current one (with confirmation). */
+	private async deleteOtherSessions(): Promise<void> {
+		if (this.isBusy("deleting sessions")) return;
+		const others = this.plugin.sessionStore.getAll().filter((s) => s.id !== this.session.id).length;
+		if (others === 0) {
+			new Notice("No other sessions to delete.");
+			return;
+		}
+		const answer = await showUIDialog(this.app, {
+			type: "extension_ui_request",
+			id: "delete-other-sessions",
+			method: "confirm",
+			title: "Delete all other sessions?",
+			message: `This permanently removes ${others} other session${others === 1 ? "" : "s"}, keeping only the current one. This cannot be undone.`,
+		});
+		if (answer.confirmed !== true) return;
+		const removed = this.plugin.sessionStore.keepOnly(this.session.id);
+		this.setStatus(`Deleted ${removed} other session${removed === 1 ? "" : "s"}.`);
 	}
 
 	private clearConversationDom(): void {
