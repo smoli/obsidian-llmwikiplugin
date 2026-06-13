@@ -39,6 +39,7 @@ export class LlmChatView extends ItemView {
 	private contextEl!: HTMLElement;
 	private sendBtn!: HTMLButtonElement;
 	private stopBtn!: HTMLButtonElement;
+	private newBtn!: HTMLButtonElement;
 	private statusEl!: HTMLElement;
 	private engineSelect!: HTMLSelectElement;
 	private modelSelect!: HTMLSelectElement;
@@ -136,9 +137,9 @@ export class LlmChatView extends ItemView {
 		setIcon(sessionsBtn, "history");
 		sessionsBtn.addEventListener("click", (e) => this.openSessionMenu(e));
 
-		const newBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "New session" } });
-		setIcon(newBtn, "plus");
-		newBtn.addEventListener("click", () => this.startNewSession());
+		this.newBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "New session" } });
+		setIcon(this.newBtn, "plus");
+		this.newBtn.addEventListener("click", () => this.startNewSession());
 
 		const saveBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "Save chat as Markdown" } });
 		setIcon(saveBtn, "save");
@@ -159,6 +160,10 @@ export class LlmChatView extends ItemView {
 	}
 
 	private async onEngineChange(): Promise<void> {
+		if (this.isBusy("switching engine")) {
+			this.engineSelect.value = this.plugin.settings.engine;
+			return;
+		}
 		const engine = this.engineSelect.value as "pi" | "claude";
 		this.plugin.settings.engine = engine;
 		await this.plugin.saveSettings();
@@ -181,6 +186,10 @@ export class LlmChatView extends ItemView {
 	}
 
 	private async onPersonaChange(): Promise<void> {
+		if (this.isBusy("changing persona")) {
+			this.personaSelect.value = this.plugin.settings.selectedPersona;
+			return;
+		}
 		this.plugin.settings.selectedPersona = this.personaSelect.value;
 		await this.plugin.saveSettings();
 		// A different system prompt means a new conversation.
@@ -586,12 +595,25 @@ export class LlmChatView extends ItemView {
 	 * context shown above the input. The context is prepended to the user's next
 	 * message. The agent still has full vault access (it runs in the vault root).
 	 */
-	async seedContext(pagePath: string, selection?: string): Promise<void> {
-		await this.ensureRunning();
-		// Only reset if there's already a conversation; a just-opened panel is fresh.
-		if (this.transcriptEl.childElementCount > 0) {
-			await this.startNewSession();
+	async seedContext(pagePath: string, selection?: string, persona = ""): Promise<void> {
+		// Apply the requested persona ("" = Default/AGENTS.md) before the engine
+		// launches, so the new chat starts with the right system prompt.
+		const personaChanged = this.plugin.settings.selectedPersona !== persona;
+		this.plugin.settings.selectedPersona = persona;
+		if (personaChanged) {
+			await this.plugin.saveSettings();
+			this.renderPersonaSelect();
 		}
+
+		// Relaunch on a fresh session whenever a backend is already running (it may
+		// have started with a different persona) or a conversation exists. A truly
+		// just-opened panel connects for the first time with the persona set above.
+		if (this.backend != null || this.transcriptEl.childElementCount > 0) {
+			await this.startFreshSession();
+		} else {
+			await this.ensureRunning();
+		}
+
 		const sel = selection ? selection.replace(/\r\n/g, "\n").trim() : undefined;
 		this.pendingContext = { pagePath, selection: sel || undefined };
 		this.renderPendingContext();
@@ -634,6 +656,7 @@ export class LlmChatView extends ItemView {
 	}
 
 	private async startNewSession(): Promise<void> {
+		if (this.isBusy("starting a new session")) return;
 		await this.startFreshSession();
 	}
 
@@ -667,6 +690,7 @@ export class LlmChatView extends ItemView {
 	private async switchSession(id: string): Promise<void> {
 		const target = this.plugin.sessionStore.get(id);
 		if (!target || target.id === this.session.id) return;
+		if (this.isBusy("switching sessions")) return;
 
 		this.session = target;
 		// Align engine + persona so the engine can resume the right conversation.
@@ -684,7 +708,7 @@ export class LlmChatView extends ItemView {
 
 	private openSessionMenu(evt: MouseEvent): void {
 		const menu = new Menu();
-		menu.addItem((i) => i.setTitle("New session").setIcon("plus").onClick(() => void this.startFreshSession()));
+		menu.addItem((i) => i.setTitle("New session").setIcon("plus").onClick(() => void this.startNewSession()));
 
 		const sessions = this.plugin.sessionStore.getAll();
 		if (sessions.length) {
@@ -721,6 +745,7 @@ export class LlmChatView extends ItemView {
 	}
 
 	private async deleteCurrentSession(): Promise<void> {
+		if (this.isBusy("deleting the session")) return;
 		this.plugin.sessionStore.remove(this.session.id);
 		await this.startFreshSession();
 		this.setStatus("Session deleted.");
@@ -1412,6 +1437,17 @@ export class LlmChatView extends ItemView {
 			this.stopBtn.hide();
 			this.sendBtn.setText("Send");
 		}
+		// Can't start/replace a session mid-run — it would abort the response.
+		this.newBtn.disabled = this.streaming;
+	}
+
+	/** True (with a notice) if a run is in flight, used to block session changes. */
+	private isBusy(action: string): boolean {
+		if (this.streaming) {
+			new Notice(`Finish or stop the current response before ${action}.`);
+			return true;
+		}
+		return false;
 	}
 
 	private scrollToBottom(force = false): void {

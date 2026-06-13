@@ -46,6 +46,14 @@
 	background: var(--background-modifier-hover);
 	color: var(--text-normal);
 }
+.llm-icon-btn:disabled {
+	opacity: 0.4;
+	cursor: not-allowed;
+}
+.llm-icon-btn:disabled:hover {
+	background: transparent;
+	color: var(--text-muted);
+}
 .llm-stop-btn {
 	color: var(--text-error);
 }

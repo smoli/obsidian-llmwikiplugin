@@ -78,12 +78,23 @@ export default class LlmAgentPlugin extends Plugin {
 				const file = info.file ?? null;
 				if (!sel && !file) return;
 				const target = sel ? "selection" : "this page";
+				const engine = this.engineLabel();
+				// Original entry: always uses the vault's AGENTS.md (persona "").
 				menu.addItem((item) =>
 					item
-						.setTitle(`Ask ${this.engineLabel()} about ${target}`)
+						.setTitle(`Ask ${engine} about ${target}`)
 						.setIcon("bot")
-						.onClick(() => this.askAbout(file, sel))
+						.onClick(() => this.askAbout(file, sel, ""))
 				);
+				// One entry per persona, auto-selecting it in the created chat.
+				for (const p of this.getPersonas()) {
+					menu.addItem((item) =>
+						item
+							.setTitle(`Ask ${engine} about ${target} as ${p.name}`)
+							.setIcon("bot")
+							.onClick(() => this.askAbout(file, sel, p.path))
+					);
+				}
 			})
 		);
 
@@ -167,7 +178,7 @@ export default class LlmAgentPlugin extends Plugin {
 	}
 
 	/** Open the panel and seed a fresh session with a page (and optional selection). */
-	private async askAbout(file: TFile | null, selection?: string): Promise<void> {
+	private async askAbout(file: TFile | null, selection?: string, persona = ""): Promise<void> {
 		if (!file && !selection) {
 			new Notice("Open a note or select some text first.");
 			return;
@@ -175,7 +186,7 @@ export default class LlmAgentPlugin extends Plugin {
 		const pagePath = file ? this.toAgentPath(file.path) : "(unknown page)";
 		const leaf = await this.activateView();
 		if (leaf?.view instanceof LlmChatView) {
-			await leaf.view.seedContext(pagePath, selection);
+			await leaf.view.seedContext(pagePath, selection, persona);
 		}
 	}
 
