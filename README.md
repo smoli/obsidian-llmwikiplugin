@@ -102,9 +102,13 @@ fast with a notice rather than hanging).
 ### Quick prompts (one-click buttons)
 
 The bar above the input holds reusable prompts you can fire with a single click.
-They are **defined per persona** in the persona file's frontmatter, so each
-persona shows its own relevant buttons (and the *Default (AGENTS.md)* mode shows
-none). Add a `prompts:` list of `Label | Prompt text` strings:
+They come from frontmatter, scoped to the active mode:
+
+- **A persona** shows the `prompts:` from its own frontmatter.
+- **Default (AGENTS.md) mode** shows the `prompts:` from your **AGENTS.md**
+  frontmatter — these are your baseline prompts when no persona is selected.
+
+Add a `prompts:` list of `Label | Prompt text` strings, e.g. in a persona:
 
 ```markdown
 ---
@@ -116,13 +120,28 @@ prompts:
 ---
 ```
 
+…or at the top of `AGENTS.md` for the default buttons:
+
+```markdown
+---
+prompts:
+  - Lint wiki | Audit the wiki per AGENTS.md and list issues with fixes.
+  - Ingest raw/ | Check raw/ for new sources and ingest them per AGENTS.md.
+---
+# (rest of your AGENTS.md…)
+```
+
 Each entry is one string: the text before the first `|` is the button **label**,
 the rest is the **prompt** sent when clicked (omit the `|` to use the same text
 for both). A plain list of strings keeps the entries editable in Obsidian's
 Properties UI — it can't edit nested objects, so it would otherwise rewrite them
-to JSON. The bar updates automatically when you edit the persona file or switch
-persona. Clicking a button sends its prompt immediately (and *steers* the engine
-if it's already running).
+to JSON. The bar updates automatically when you edit the file or switch persona.
+Clicking a button sends its prompt immediately (and *steers* the engine if it's
+already running).
+
+> Note: the plugin strips the frontmatter from AGENTS.md before using it as the
+> agent's system prompt (for Claude, and for pi via `--no-context-files` plus a
+> stripped re-inject), so the `prompts:` block isn't fed to the model.
 
 ## Saving a chat
 
@@ -188,8 +207,9 @@ remembered. `name:` (or `title:`) sets the display label; otherwise the file nam
 is used.
 
 > For Claude Code the persona replaces the AGENTS.md prompt while keeping Claude's
-> built-in working-directory grounding. For pi the persona is appended to its
-> prompt (pi still auto-loads AGENTS.md from the vault root).
+> built-in working-directory grounding. For pi the persona is appended on top of
+> AGENTS.md (the plugin injects AGENTS.md itself, frontmatter stripped, via
+> `--no-context-files`).
 
 ### Persona frontmatter options
 

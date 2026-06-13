@@ -551,11 +551,15 @@ export class LlmChatView extends ItemView {
 		this.renderQuickPrompts();
 	}
 
-	/** Quick-prompt buttons come from the active persona's frontmatter `prompts:`. */
+	/**
+	 * Quick-prompt buttons come from the active persona's frontmatter `prompts:`,
+	 * or — in Default (AGENTS.md) mode — from the AGENTS.md frontmatter.
+	 */
 	private renderQuickPrompts(): void {
 		if (!this.quickBarEl) return;
 		this.quickBarEl.empty();
-		const prompts = this.plugin.getSelectedPersona()?.prompts ?? [];
+		const persona = this.plugin.getSelectedPersona();
+		const prompts = persona ? persona.prompts : this.plugin.getDefaultPrompts();
 		if (prompts.length === 0) {
 			this.quickBarEl.hide();
 			return;
@@ -603,11 +607,13 @@ export class LlmChatView extends ItemView {
 				cwd,
 				model: s.claudeModel || "default",
 				permissionMode: s.claudePermissionMode,
-				agentsFile: personaFile ?? this.plugin.getAgentsFile() ?? undefined,
+				agentsFile: personaFile ?? this.plugin.resolveAgentsPromptFile() ?? undefined,
 				agentsMode: s.claudeAgentsMode,
 				resumeSessionId,
 			});
 		} else {
+			// Disable pi's raw AGENTS.md auto-load and re-inject the frontmatter-stripped
+			// version (plus the persona, if any) so pi never sees the prompts frontmatter.
 			this.backend = new PiBackend({
 				piPath: s.piPath,
 				cwd,
@@ -615,7 +621,10 @@ export class LlmChatView extends ItemView {
 				model: s.model || undefined,
 				thinking: s.thinking,
 				persistSession: s.persistSession,
-				appendSystemPromptFile: personaFile ?? undefined,
+				disableContextFiles: true,
+				appendSystemPromptFiles: [this.plugin.resolveAgentsPromptFile(), personaFile].filter(
+					(f): f is string => !!f
+				),
 				resumeSessionId,
 			});
 		}

@@ -26,16 +26,21 @@ export interface Persona {
 	prompts: QuickPrompt[];
 }
 
+/** Remove a leading YAML frontmatter block (`---` … `---`) from markdown. */
+function stripFrontmatter(content: string): string {
+	return content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
+}
+
 /**
- * Parse a persona's frontmatter `prompts:` list into QuickPrompts. Tolerant of
- * the forms a persona file may carry:
+ * Parse a frontmatter `prompts:` list into QuickPrompts (used by both personas
+ * and the Default-mode AGENTS.md). Tolerant of the forms a file may carry:
  *  - a plain string `"Label | Prompt text"` (preferred — stays editable in
  *    Obsidian's Properties UI as a list of text items),
  *  - a plain string with no `|` (used as both label and prompt),
  *  - a `{label, prompt}` object,
  *  - a JSON-string object (Obsidian rewrites nested objects to JSON strings).
  */
-function parsePersonaPrompts(raw: unknown): QuickPrompt[] {
+function parseQuickPrompts(raw: unknown): QuickPrompt[] {
 	if (!Array.isArray(raw)) return [];
 	const out: QuickPrompt[] = [];
 	for (const item of raw) {
@@ -141,7 +146,7 @@ export default class LlmAgentPlugin extends Plugin {
 		// whenever a file's metadata changes.
 		this.registerEvent(
 			this.app.metadataCache.on("changed", (file: TFile) => {
-				if (!file.path.includes("/")) this.refreshOpenViews();
+				if (!file.path.includes("/") || file.name === "AGENTS.md") this.refreshOpenViews();
 			})
 		);
 
@@ -334,7 +339,7 @@ export default class LlmAgentPlugin extends Plugin {
 				const responseSchema = schema === true || schema === "true";
 				const vault = fm.wholeVault ?? fm.whole_vault ?? fm.vaultOnly;
 				const wholeVault = vault === true || vault === "true";
-				const prompts = parsePersonaPrompts(fm.prompts);
+				const prompts = parseQuickPrompts(fm.prompts);
 				out.push({ path: f.path, name, responseSchema, wholeVault, prompts });
 			}
 		}
@@ -347,6 +352,20 @@ export default class LlmAgentPlugin extends Plugin {
 		const sel = this.settings.selectedPersona;
 		if (!sel) return null;
 		return this.getPersonas().find((p) => p.path === sel) ?? null;
+	}
+
+	/**
+	 * Quick prompts for Default (AGENTS.md) mode, read from the working-dir
+	 * AGENTS.md frontmatter `prompts:` list. Empty if there's no AGENTS.md or no
+	 * prompts declared.
+	 */
+	getDefaultPrompts(): QuickPrompt[] {
+		const sub = this.settings.workingDir?.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+		const rel = sub ? `${sub}/AGENTS.md` : "AGENTS.md";
+		const file = this.app.vault.getAbstractFileByPath(rel);
+		if (!(file instanceof TFile)) return [];
+		const fm = this.app.metadataCache.getFileCache(file)?.frontmatter as Record<string, unknown> | undefined;
+		return parseQuickPrompts(fm?.prompts);
 	}
 
 	/**
@@ -364,8 +383,7 @@ export default class LlmAgentPlugin extends Plugin {
 		const abs = path.join(base, sel);
 		try {
 			if (!fs.existsSync(abs)) return null;
-			let content = fs.readFileSync(abs, "utf8");
-			content = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
+			let content = stripFrontmatter(fs.readFileSync(abs, "utf8"));
 			if (!content) return null;
 			if (this.getSelectedPersona()?.responseSchema) content += RESPONSE_SCHEMA_INSTRUCTION;
 			const slug = sel.replace(/[^a-zA-Z0-9]+/g, "-");
@@ -407,12 +425,32 @@ export default class LlmAgentPlugin extends Plugin {
 		}
 	}
 
-	/** Contents of the working directory's AGENTS.md, or "" if absent. */
+	/**
+	 * AGENTS.md as a system-prompt file with its frontmatter stripped, written to
+	 * a temp file. Used as Claude's system prompt so the `prompts:` frontmatter
+	 * isn't fed to the model. Returns null if there's no AGENTS.md (or no body
+	 * once frontmatter is removed). pi can't use this — it reads AGENTS.md itself.
+	 */
+	resolveAgentsPromptFile(): string | null {
+		const src = this.getAgentsFile();
+		if (!src) return null;
+		try {
+			const content = stripFrontmatter(fs.readFileSync(src, "utf8"));
+			if (!content) return null;
+			const tmp = path.join(os.tmpdir(), "llm-agent-agents.md");
+			fs.writeFileSync(tmp, content + "\n", "utf8");
+			return tmp;
+		} catch {
+			return null;
+		}
+	}
+
+	/** Contents of the working directory's AGENTS.md (frontmatter stripped), or "". */
 	getAgentsContent(): string {
 		const p = this.getAgentsFile();
 		if (!p) return "";
 		try {
-			return fs.readFileSync(p, "utf8");
+			return stripFrontmatter(fs.readFileSync(p, "utf8"));
 		} catch {
 			return "";
 		}

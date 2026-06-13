@@ -25,8 +25,13 @@ export interface PiClientOptions {
 	thinking?: ThinkingLevel;
 	/** Persist sessions to disk (false adds --no-session). */
 	persistSession: boolean;
-	/** File whose contents are appended to the system prompt (persona). */
-	appendSystemPromptFile?: string;
+	/**
+	 * Files whose contents are appended to the system prompt, in order (stripped
+	 * AGENTS.md and/or a persona). pi reads each path's contents.
+	 */
+	appendSystemPromptFiles?: string[];
+	/** Add --no-context-files so pi doesn't auto-load the raw AGENTS.md/CLAUDE.md. */
+	disableContextFiles?: boolean;
 	/** Existing session id/file to resume (for switching sessions). */
 	resumeSessionId?: string;
 	/** Extra environment variables merged over process.env. */
@@ -71,7 +76,8 @@ export class PiClient extends EventEmitter {
 		if (this.opts.provider) args.push("--provider", this.opts.provider);
 		if (this.opts.model) args.push("--model", this.opts.model);
 		if (this.opts.thinking) args.push("--thinking", this.opts.thinking);
-		if (this.opts.appendSystemPromptFile) args.push("--append-system-prompt", this.opts.appendSystemPromptFile);
+		if (this.opts.disableContextFiles) args.push("--no-context-files");
+		for (const file of this.opts.appendSystemPromptFiles ?? []) args.push("--append-system-prompt", file);
 
 		// On Windows the `pi` binary is a `.cmd` shim, which requires a shell to
 		// launch. Elsewhere we spawn directly.
