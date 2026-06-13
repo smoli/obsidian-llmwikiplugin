@@ -596,6 +596,8 @@ export class LlmChatView extends ItemView {
 
 		// A selected persona replaces AGENTS.md as the system prompt for this session.
 		const personaFile = this.plugin.resolvePersonaPromptFile();
+		// Fixed instructions appended every session (e.g. path:line linking).
+		const instructionFile = this.plugin.resolveFixedInstructionFile();
 		this.structuredResponse = this.plugin.getSelectedPersona()?.responseSchema === true;
 		this.session.engine = engine;
 		this.session.persona = s.selectedPersona;
@@ -609,6 +611,7 @@ export class LlmChatView extends ItemView {
 				permissionMode: s.claudePermissionMode,
 				agentsFile: personaFile ?? this.plugin.resolveAgentsPromptFile() ?? undefined,
 				agentsMode: s.claudeAgentsMode,
+				appendPromptFile: instructionFile ?? undefined,
 				resumeSessionId,
 			});
 		} else {
@@ -622,9 +625,11 @@ export class LlmChatView extends ItemView {
 				thinking: s.thinking,
 				persistSession: s.persistSession,
 				disableContextFiles: true,
-				appendSystemPromptFiles: [this.plugin.resolveAgentsPromptFile(), personaFile].filter(
-					(f): f is string => !!f
-				),
+				appendSystemPromptFiles: [
+					this.plugin.resolveAgentsPromptFile(),
+					personaFile,
+					instructionFile,
+				].filter((f): f is string => !!f),
 				resumeSessionId,
 			});
 		}
@@ -1365,11 +1370,13 @@ export class LlmChatView extends ItemView {
 	/**
 	 * Walk the rendered markdown and turn references to existing vault pages
 	 * (e.g. `wiki/agentic-development/index.md`) into clickable links that open
-	 * the page in the main document area. Paths that don't resolve to a real
-	 * file are left as plain text.
+	 * the page in the main document area. An optional `:line` (or `:line-range`)
+	 * suffix — e.g. `notes/long.md:128` — opens the file scrolled to that line, so
+	 * the agent can point at where it made a change. Paths that don't resolve to a
+	 * real file are left as plain text.
 	 */
 	private linkifyPaths(root: HTMLElement): void {
-		const pathRe = /[A-Za-z0-9_.\-/\\]+\.(?:md|markdown)\b/g;
+		const pathRe = /([A-Za-z0-9_.\-/\\]+\.(?:md|markdown)\b)(?::(\d+)(?:-\d+)?)?/g;
 
 		const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
 			acceptNode: (node: Node) => {
@@ -1396,13 +1403,14 @@ export class LlmChatView extends ItemView {
 
 			while ((match = pathRe.exec(text)) !== null) {
 				const raw = match[0];
-				const dest = this.resolvePagePath(raw);
+				const dest = this.resolvePagePath(match[1]);
 				if (!dest) continue;
 				found = true;
+				const line = match[2] ? parseInt(match[2], 10) : undefined;
 				if (match.index > lastIndex) {
 					frag.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
 				}
-				frag.appendChild(this.createPageLink(raw, dest));
+				frag.appendChild(this.createPageLink(raw, dest, line));
 				lastIndex = match.index + raw.length;
 			}
 
@@ -1414,24 +1422,38 @@ export class LlmChatView extends ItemView {
 		}
 	}
 
-	private createPageLink(label: string, dest: TFile): HTMLAnchorElement {
+	private createPageLink(label: string, dest: TFile, line?: number): HTMLAnchorElement {
 		const a = document.createElement("a");
 		a.className = "llm-page-link";
 		a.textContent = label;
 		a.setAttribute("href", dest.path);
-		a.setAttribute("aria-label", dest.path);
+		a.setAttribute("aria-label", line != null ? `${dest.path}:${line}` : dest.path);
 		a.addEventListener("click", (e) => {
 			e.preventDefault();
 			const newLeaf: PaneType | boolean = e.ctrlKey || e.metaKey ? "tab" : false;
-			void this.app.workspace.openLinkText(dest.path, "", newLeaf);
+			void this.openPage(dest, line, newLeaf);
 		});
 		a.addEventListener("auxclick", (e) => {
 			if (e.button === 1) {
 				e.preventDefault();
-				void this.app.workspace.openLinkText(dest.path, "", "tab");
+				void this.openPage(dest, line, "tab");
 			}
 		});
 		return a;
+	}
+
+	/**
+	 * Open a vault page, optionally scrolled to a 1-based line. Obsidian's
+	 * ephemeral `{ line }` state (0-based) drives the scroll in both reading and
+	 * editing mode — the same mechanism its search uses to jump to a result.
+	 */
+	private async openPage(dest: TFile, line: number | undefined, newLeaf: PaneType | boolean): Promise<void> {
+		if (line == null) {
+			await this.app.workspace.openLinkText(dest.path, "", newLeaf);
+			return;
+		}
+		const leaf = this.app.workspace.getLeaf(newLeaf);
+		await leaf.openFile(dest, { eState: { line: Math.max(0, line - 1) } });
 	}
 
 	/** Resolve a path the agent printed to an existing vault TFile, or null. */

@@ -21,6 +21,8 @@ export interface ClaudeBackendOptions {
 	agentsFile?: string;
 	/** Append AGENTS.md to Claude's default prompt, or replace it entirely. */
 	agentsMode: "append" | "replace";
+	/** File with fixed instructions appended to the system prompt every session. */
+	appendPromptFile?: string;
 	/** Existing session_id to resume on startup (for switching sessions). */
 	resumeSessionId?: string;
 	env?: Record<string, string>;
@@ -111,6 +113,8 @@ export class ClaudeBackend extends BaseBackend implements AgentBackend {
 			// and add the wiki rules on top.
 			args.push("--append-system-prompt-file", o.agentsFile);
 		}
+		// Fixed plugin instructions (e.g. path:line linking) — always on top.
+		if (o.appendPromptFile) args.push("--append-system-prompt-file", o.appendPromptFile);
 		if (resume && this.sessionId) args.push("--resume", this.sessionId);
 
 		// .exe can be spawned directly; a bare command / .cmd shim needs a shell on Windows.

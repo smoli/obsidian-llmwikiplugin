@@ -253,6 +253,20 @@ the plugin instructs the model. If a reply ever doesn't match the format, the
 panel falls back to rendering it as plain markdown, so nothing breaks. Works with
 both engines.
 
+## Page links & jump-to-line
+
+Vault page paths in the agent's replies (e.g. `05-wiki/foo/bar.md`) render as
+**clickable links** that open the page. A path can carry a line suffix —
+`05-wiki/foo/bar.md:128` (or a range `:128-140`) — and the link then opens the
+page **scrolled to that line**, so the agent can point you straight at a change
+it made in a long file. `Ctrl`/`Cmd`-click or middle-click opens in a new tab.
+
+Every session's system prompt includes a fixed instruction asking the agent to
+use this `path:line` form when it knows an accurate line number (and to omit the
+line when unsure), so this works regardless of engine, persona, or AGENTS.md.
+Line numbers are inherently best-effort — they can drift after further edits — so
+treat them as "jump near here," not a permanent anchor.
+
 ## Ask about a selection
 
 Right-click in a note (edit / live-preview mode):

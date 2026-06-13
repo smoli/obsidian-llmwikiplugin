@@ -126,6 +126,20 @@ Rules:
 - You may still use your tools as needed; this format applies only to the
   messages you address to the user.`;
 
+/**
+ * Always appended to the system prompt (both engines, every session). Lets the
+ * agent point the user at exact spots: the chat panel turns `path:line`
+ * references into links that open the page scrolled to that line.
+ */
+export const WIKI_LINE_LINK_INSTRUCTION = `## Pointing at lines
+
+When you reference a vault page in your reply — especially to point at a change
+you just made — and you know the relevant line number, write the reference as
+\`pagepath:line\` (e.g. \`05-wiki/foo/bar.md:128\`), or \`pagepath:start-end\` for a
+range. The panel turns these into links that jump straight to that line. Only add
+a line number when you are confident it is accurate for the current file; if you
+are unsure, reference the page path without a line.`;
+
 export default class LlmAgentPlugin extends Plugin {
 	declare settings: LlmAgentSettings;
 	sessionStore!: SessionStore;
@@ -439,6 +453,21 @@ export default class LlmAgentPlugin extends Plugin {
 			if (!content) return null;
 			const tmp = path.join(os.tmpdir(), "llm-agent-agents.md");
 			fs.writeFileSync(tmp, content + "\n", "utf8");
+			return tmp;
+		} catch {
+			return null;
+		}
+	}
+
+	/**
+	 * Temp file holding the fixed instructions appended to every session's system
+	 * prompt (currently the `path:line` linking convention). Returns null on a
+	 * write error so callers simply skip it.
+	 */
+	resolveFixedInstructionFile(): string | null {
+		try {
+			const tmp = path.join(os.tmpdir(), "llm-agent-instructions.md");
+			fs.writeFileSync(tmp, WIKI_LINE_LINK_INSTRUCTION + "\n", "utf8");
 			return tmp;
 		} catch {
 			return null;
