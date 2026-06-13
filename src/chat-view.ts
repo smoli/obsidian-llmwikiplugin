@@ -96,8 +96,8 @@ function parseResponseEnvelopes(raw: string): ResponseEnvelope[] {
 
 /**
  * Markdown rendering of envelopes for the transcript (saved chats + session
- * restore). Choices become a numbered list so restored single-choice questions
- * are re-decorated as clickable by decorateOptions.
+ * restore). Choices become a numbered list — readable in saved chats; on restore
+ * they render as a static list (the live chips come from renderStructuredInto).
  */
 function envelopesToTranscript(envs: ResponseEnvelope[]): string {
 	return envs
@@ -1157,7 +1157,7 @@ export class LlmChatView extends ItemView {
 	private renderAssistantBlock(text: string): void {
 		const block = this.appendBlock("llm-msg llm-msg-assistant");
 		const body = block.createDiv({ cls: "llm-msg-body" });
-		this.renderMarkdownInto(body, text, true);
+		this.renderMarkdownInto(body, text);
 		this.scrollToBottom();
 	}
 
@@ -1281,45 +1281,11 @@ export class LlmChatView extends ItemView {
 		});
 	}
 
-	private renderMarkdownInto(el: HTMLElement, markdown: string, decorate = false): void {
+	private renderMarkdownInto(el: HTMLElement, markdown: string): void {
 		el.empty();
 		void MarkdownRenderer.render(this.app, markdown, el, "", this).then(() => {
-			// Decorate options before linkify so option paths don't become page links.
-			if (decorate) this.decorateOptions(el);
 			this.linkifyPaths(el);
 		});
-	}
-
-	/**
-	 * If an assistant message poses a choice — a trailing question mark plus an
-	 * ordered list of 2+ items — turn those list items into clickable option chips
-	 * (visually distinct from wiki links). Clicking one sends it as the reply.
-	 */
-	private decorateOptions(root: HTMLElement): void {
-		if (!root.closest(".llm-msg-assistant")) return;
-		if (!(root.textContent ?? "").trim().endsWith("?")) return;
-
-		const lists = root.querySelectorAll("ol");
-		if (lists.length === 0) return;
-		const ol = lists[lists.length - 1] as HTMLElement;
-		const items = Array.from(ol.children).filter((c) => c.tagName === "LI") as HTMLElement[];
-		if (items.length < 2) return;
-
-		ol.classList.add("llm-options");
-		for (const li of items) {
-			li.classList.add("llm-option");
-			li.setAttribute("role", "button");
-			li.setAttribute("tabindex", "0");
-			const reply = (li.textContent ?? "").trim();
-			const choose = () => this.chooseOption(ol, li, reply);
-			li.addEventListener("click", choose);
-			li.addEventListener("keydown", (e) => {
-				if (e.key === "Enter" || e.key === " ") {
-					e.preventDefault();
-					choose();
-				}
-			});
-		}
 	}
 
 	private chooseOption(ol: HTMLElement, li: HTMLElement, reply: string): void {
@@ -1492,7 +1458,7 @@ export class LlmChatView extends ItemView {
 			} else {
 				// Plain message, or a structured persona whose output didn't parse —
 				// fall back to rendering the raw text as markdown.
-				this.renderMarkdownInto(this.currentTextEl, this.currentText, true);
+				this.renderMarkdownInto(this.currentTextEl, this.currentText);
 				if (this.currentText.trim()) {
 					this.session.transcript.push({ role: "assistant", text: this.currentText });
 					this.afterTranscriptChange();
