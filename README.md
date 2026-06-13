@@ -217,6 +217,12 @@ question in the clean input box; the attached context is prepended to your
 message when you send, then the chip clears. The agent still has full vault access, so it can pull in
 anything else it needs to answer.
 
+The base entry uses your vault's `AGENTS.md`. If you have personas, each one adds
+a variant — **"Ask <engine> about selection as <persona>"** — that opens the
+chat with that persona selected. Personas marked `wholeVault: true` in their
+frontmatter are left out here, since they're meant to work on the whole vault
+rather than a single selection or page.
+
 ## Automation: run on new file
 
 The plugin can watch a folder and automatically run a prompt whenever a new file

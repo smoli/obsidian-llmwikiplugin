@@ -17,6 +17,11 @@ export interface Persona {
 	name: string;
 	/** When true, the agent is asked to reply with a structured response envelope. */
 	responseSchema?: boolean;
+	/**
+	 * When true, the persona is meant to operate on the whole vault, so it is not
+	 * offered in the "Ask … about selection/page" context menu.
+	 */
+	wholeVault?: boolean;
 	/** One-click prompts declared in the persona's frontmatter. */
 	prompts: QuickPrompt[];
 }
@@ -189,7 +194,9 @@ export default class LlmAgentPlugin extends Plugin {
 						.onClick(() => this.askAbout(file, sel, ""))
 				);
 				// One entry per persona, auto-selecting it in the created chat.
+				// Whole-vault personas are skipped — they don't act on a selection/page.
 				for (const p of this.getPersonas()) {
+					if (p.wholeVault) continue;
 					menu.addItem((item) =>
 						item
 							.setTitle(`Ask ${engine} about ${target} as ${p.name}`)
@@ -325,8 +332,10 @@ export default class LlmAgentPlugin extends Plugin {
 					f.basename;
 				const schema = fm.responseSchema ?? fm.response_schema ?? fm.RESPONSE_SCHEMA;
 				const responseSchema = schema === true || schema === "true";
+				const vault = fm.wholeVault ?? fm.whole_vault ?? fm.vaultOnly;
+				const wholeVault = vault === true || vault === "true";
 				const prompts = parsePersonaPrompts(fm.prompts);
-				out.push({ path: f.path, name, responseSchema, prompts });
+				out.push({ path: f.path, name, responseSchema, wholeVault, prompts });
 			}
 		}
 		out.sort((a, b) => a.name.localeCompare(b.name));
