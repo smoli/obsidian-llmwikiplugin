@@ -21,18 +21,49 @@ export interface Persona {
 	prompts: QuickPrompt[];
 }
 
-/** Parse a persona's frontmatter `prompts:` list into QuickPrompts (tolerant). */
+/**
+ * Parse a persona's frontmatter `prompts:` list into QuickPrompts. Tolerant of
+ * the forms a persona file may carry:
+ *  - a plain string `"Label | Prompt text"` (preferred — stays editable in
+ *    Obsidian's Properties UI as a list of text items),
+ *  - a plain string with no `|` (used as both label and prompt),
+ *  - a `{label, prompt}` object,
+ *  - a JSON-string object (Obsidian rewrites nested objects to JSON strings).
+ */
 function parsePersonaPrompts(raw: unknown): QuickPrompt[] {
 	if (!Array.isArray(raw)) return [];
 	const out: QuickPrompt[] = [];
 	for (const item of raw) {
+		let value: unknown = item;
 		if (typeof item === "string") {
 			const s = item.trim();
-			if (s) out.push({ label: s.length > 40 ? s.slice(0, 40) + "…" : s, prompt: s });
+			if (!s) continue;
+			// Obsidian may have stored a {label,prompt} object as a JSON string.
+			if (s.startsWith("{")) {
+				try {
+					value = JSON.parse(s);
+				} catch {
+					value = s;
+				}
+			} else {
+				value = s;
+			}
+		}
+
+		if (typeof value === "string") {
+			const sep = value.indexOf("|");
+			if (sep === -1) {
+				out.push({ label: value.length > 40 ? value.slice(0, 40) + "…" : value, prompt: value });
+			} else {
+				const label = value.slice(0, sep).trim();
+				const prompt = value.slice(sep + 1).trim();
+				if (label || prompt) out.push({ label: label || prompt.slice(0, 40), prompt: prompt || label });
+			}
 			continue;
 		}
-		if (!item || typeof item !== "object") continue;
-		const o = item as Record<string, unknown>;
+
+		if (!value || typeof value !== "object") continue;
+		const o = value as Record<string, unknown>;
 		const prompt = typeof o.prompt === "string" ? o.prompt : typeof o.text === "string" ? o.text : "";
 		const label = typeof o.label === "string" && o.label.trim() ? o.label.trim() : prompt.trim().slice(0, 40);
 		if (!label && !prompt) continue;

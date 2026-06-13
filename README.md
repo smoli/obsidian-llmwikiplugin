@@ -104,22 +104,23 @@ fast with a notice rather than hanging).
 The bar above the input holds reusable prompts you can fire with a single click.
 They are **defined per persona** in the persona file's frontmatter, so each
 persona shows its own relevant buttons (and the *Default (AGENTS.md)* mode shows
-none). Add a `prompts:` list to the persona's frontmatter:
+none). Add a `prompts:` list of `Label | Prompt text` strings:
 
 ```markdown
 ---
 PERSONA: true
 name: Vault-Quiz
 prompts:
-  - label: Nächste Frage
-    prompt: Stelle die nächste Quizfrage.
-  - label: Punktestand
-    prompt: Zeige mir meinen aktuellen Punktestand.
+  - Nächste Frage | Stelle die nächste Quizfrage.
+  - Punktestand | Zeige mir meinen aktuellen Punktestand.
 ---
 ```
 
-Each entry has a short `label` (the button text) and the `prompt` sent when
-clicked. The bar updates automatically when you edit the persona file or switch
+Each entry is one string: the text before the first `|` is the button **label**,
+the rest is the **prompt** sent when clicked (omit the `|` to use the same text
+for both). A plain list of strings keeps the entries editable in Obsidian's
+Properties UI — it can't edit nested objects, so it would otherwise rewrite them
+to JSON. The bar updates automatically when you edit the persona file or switch
 persona. Clicking a button sends its prompt immediately (and *steers* the engine
 if it's already running).
 

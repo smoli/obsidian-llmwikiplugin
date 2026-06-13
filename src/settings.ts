@@ -353,9 +353,10 @@ export class LlmAgentSettingTab extends PluginSettingTab {
 		containerEl.createEl("h3", { text: "Personas & prompts" });
 		containerEl.createEl("p", {
 			text:
-				"One-click prompts are now defined per persona, in the persona file's frontmatter " +
-				"(a vault-root markdown file with `PERSONA: true`). Add a `prompts:` list of " +
-				"`label`/`prompt` entries; its buttons appear in the panel while that persona is active.",
+				"One-click prompts are defined per persona, in the persona file's frontmatter " +
+				"(a vault-root markdown file with PERSONA: true). Add a `prompts:` list where each " +
+				"entry is a string \"Label | Prompt text\"; its buttons appear in the panel while that " +
+				"persona is active. Plain strings stay editable in Obsidian's Properties view.",
 			cls: "setting-item-description",
 		});
 	}
