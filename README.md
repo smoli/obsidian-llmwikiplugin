@@ -191,6 +191,48 @@ is used.
 > built-in working-directory grounding. For pi the persona is appended to its
 > prompt (pi still auto-loads AGENTS.md from the vault root).
 
+### Persona frontmatter options
+
+Beyond `name`, a persona's frontmatter accepts:
+
+| Key | Effect |
+|---|---|
+| `responseSchema: true` | The agent replies in a **structured format** the panel renders as clean UI instead of raw text — see below. |
+| `wholeVault: true` | The persona is meant to operate on the whole vault, so it's **left out of the "Ask … about selection/page" context menu** (it still appears in the header dropdown). |
+| `prompts:` | A list of one-click **quick prompts** shown while the persona is active (see [Quick prompts](#quick-prompts-one-click-buttons)). |
+
+```markdown
+---
+PERSONA: true
+name: Vault-Quiz
+responseSchema: true
+wholeVault: true
+prompts:
+  - Nächste Frage | Stelle die nächste Quizfrage.
+  - Punktestand | Zeige mir meinen aktuellen Punktestand.
+---
+```
+
+#### Structured responses (`responseSchema`)
+
+With `responseSchema: true`, the persona's system prompt is extended with a
+protocol that makes the agent shape every reply as one or more blocks, and the
+panel renders each by type — so an interview- or quiz-style persona doesn't have
+to be guessed at from free text:
+
+- **plain text** → rendered as markdown,
+- **single choice** → the question plus **clickable chips**; clicking one sends
+  it as your reply,
+- **multiple choice** → the question plus **checkboxes and a Send button**; tick
+  several, then send them together.
+
+A reply can combine blocks (e.g. feedback text followed by the next question's
+chips). The format is line-marker based under the hood (not JSON), which keeps it
+robust against quotes and punctuation in the text; you don't write it yourself —
+the plugin instructs the model. If a reply ever doesn't match the format, the
+panel falls back to rendering it as plain markdown, so nothing breaks. Works with
+both engines.
+
 ## Clickable options
 
 When the agent asks you to pick one of several choices — a message ending in a
