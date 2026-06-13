@@ -10,7 +10,53 @@ import * as os from "os";
 export interface Persona {
 	path: string;
 	name: string;
+	/** When true, the agent is asked to reply with a structured response envelope. */
+	responseSchema?: boolean;
 }
+
+/**
+ * Appended to a persona's system prompt when it opts into structured responses
+ * (frontmatter `responseSchema: true`). It constrains every user-facing message
+ * to a small JSON envelope the chat view can render as text, a single-choice
+ * question, or a multiple-choice question.
+ */
+export const RESPONSE_SCHEMA_INSTRUCTION = `
+
+## Response format (STRICT)
+
+Structure every reply to the user as one or more blocks. Begin each block with a
+marker line of the form ">>> <type>" on its own line, followed by its content on
+the next lines. Do not use JSON and do not wrap blocks in code fences.
+
+The three block types:
+
+>>> message
+<your message — ordinary markdown; multiple lines, quotes, and punctuation are all fine>
+
+>>> single_choice
+<the question — markdown allowed>
+- <option 1>
+- <option 2>
+
+>>> multi_choice
+<the question — markdown allowed>
+- <option 1>
+- <option 2>
+
+Rules:
+- Start every block with its ">>> <type>" marker line. Write the content plainly
+  underneath — no escaping, no quoting of the whole text.
+- For single_choice / multi_choice, put the question text first, then list each
+  option on its own line starting with "- ". Keep options short.
+- Use single_choice when exactly ONE answer fits, multi_choice when SEVERAL may
+  fit, and message for anything that isn't a choice.
+- A reply may combine blocks (e.g. a "message" with feedback, then a
+  "single_choice" with the next question). End a reply with at most one choice
+  block.
+- After the user answers, their next message contains the chosen option text(s) —
+  continue normally in this same format.
+- You may still use your tools as needed; this format applies only to the
+  messages you address to the user.`;
 
 export default class LlmAgentPlugin extends Plugin {
 	declare settings: LlmAgentSettings;
@@ -221,17 +267,28 @@ export default class LlmAgentPlugin extends Plugin {
 					(typeof fm.name === "string" && fm.name) ||
 					(typeof fm.title === "string" && fm.title) ||
 					f.basename;
-				out.push({ path: f.path, name });
+				const schema = fm.responseSchema ?? fm.response_schema ?? fm.RESPONSE_SCHEMA;
+				const responseSchema = schema === true || schema === "true";
+				out.push({ path: f.path, name, responseSchema });
 			}
 		}
 		out.sort((a, b) => a.name.localeCompare(b.name));
 		return out;
 	}
 
+	/** The Persona object for the currently selected persona, or null. */
+	getSelectedPersona(): Persona | null {
+		const sel = this.settings.selectedPersona;
+		if (!sel) return null;
+		return this.getPersonas().find((p) => p.path === sel) ?? null;
+	}
+
 	/**
 	 * Resolve the currently selected persona to a temp file holding its content
 	 * with frontmatter stripped, suitable to pass as a system prompt. Returns null
 	 * when no (valid) persona is selected — callers then fall back to AGENTS.md.
+	 * When the persona opts into a response schema, the structured-output protocol
+	 * is appended to its prompt.
 	 */
 	resolvePersonaPromptFile(): string | null {
 		const sel = this.settings.selectedPersona;
@@ -244,6 +301,7 @@ export default class LlmAgentPlugin extends Plugin {
 			let content = fs.readFileSync(abs, "utf8");
 			content = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim();
 			if (!content) return null;
+			if (this.getSelectedPersona()?.responseSchema) content += RESPONSE_SCHEMA_INSTRUCTION;
 			const slug = sel.replace(/[^a-zA-Z0-9]+/g, "-");
 			const tmp = path.join(os.tmpdir(), `llm-agent-persona-${slug}.md`);
 			fs.writeFileSync(tmp, content + "\n", "utf8");

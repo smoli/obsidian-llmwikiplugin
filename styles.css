@@ -218,6 +218,45 @@ code .llm-page-link {
 	opacity: 0.5;
 }
 
+/* ----- multiple-choice (structured response) ----- */
+
+.llm-multi {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin: 8px 0;
+}
+.llm-multi-option {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	background: var(--background-secondary);
+	padding: 6px 10px;
+	cursor: pointer;
+}
+.llm-multi-option:hover {
+	background: var(--background-modifier-hover);
+}
+.llm-multi-option input {
+	flex: 0 0 auto;
+	cursor: pointer;
+}
+.llm-multi-send {
+	align-self: flex-start;
+	margin-top: 2px;
+	font-size: var(--font-ui-smaller);
+	padding: 3px 14px;
+}
+.llm-multi.llm-options-answered {
+	opacity: 0.6;
+}
+.llm-multi.llm-options-answered .llm-multi-option,
+.llm-multi.llm-options-answered .llm-multi-send {
+	cursor: default;
+}
+
 /* ----- working indicator ----- */
 
 .llm-working {

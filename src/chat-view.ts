@@ -21,6 +21,95 @@ import { showUIDialog } from "./ui-dialog";
 
 export const VIEW_TYPE = "llm-agent-chat";
 
+/** Structured response shapes a schema persona may emit (see RESPONSE_SCHEMA_INSTRUCTION). */
+type ResponseEnvelope =
+	| { type: "message"; text: string }
+	| { type: "single_choice"; text: string; options: string[] }
+	| { type: "multi_choice"; text: string; options: string[] };
+
+const MARKER_RE = /^>{2,3}\s*(message|single[_-]?choice|multi[_-]?choice|single|multi)\s*:?\s*$/i;
+const OPTION_RE = /^\s*(?:[-*]|\d+[.)])\s+(.*\S)\s*$/;
+
+function normalizeMarker(raw: string): ResponseEnvelope["type"] {
+	const m = raw.toLowerCase();
+	if (m.includes("multi")) return "multi_choice";
+	if (m.includes("single")) return "single_choice";
+	return "message";
+}
+
+/**
+ * Parse a structured response into a sequence of envelopes using the marker
+ * protocol (a `>>> <type>` line per block; `- option` lines for choices). This
+ * is deliberately tolerant: text is taken verbatim (no JSON escaping, so rich
+ * prose with quotes never breaks it), and a reply with no markers degrades to a
+ * single plain message. Returns an empty array only for empty input.
+ */
+function parseResponseEnvelopes(raw: string): ResponseEnvelope[] {
+	let s = raw.trim();
+	if (!s) return [];
+	// Unwrap a single code fence wrapping the whole reply, if present.
+	const fence = s.match(/^```[a-z]*\s*([\s\S]*?)\s*```$/i);
+	if (fence) s = fence[1].trim();
+
+	const envs: ResponseEnvelope[] = [];
+	let type: ResponseEnvelope["type"] = "message";
+	let textLines: string[] = [];
+	let options: string[] = [];
+	let sawMarker = false;
+
+	const flush = () => {
+		const text = textLines.join("\n").trim();
+		if (type === "message") {
+			if (text) envs.push({ type: "message", text });
+		} else if (options.length) {
+			envs.push({ type, text, options });
+		} else if (text) {
+			envs.push({ type: "message", text });
+		}
+		textLines = [];
+		options = [];
+	};
+
+	for (const line of s.split(/\r?\n/)) {
+		const m = line.match(MARKER_RE);
+		if (m) {
+			flush();
+			type = normalizeMarker(m[1]);
+			sawMarker = true;
+			continue;
+		}
+		if (type !== "message") {
+			const opt = line.match(OPTION_RE);
+			if (opt) {
+				options.push(opt[1].trim());
+				continue;
+			}
+		}
+		textLines.push(line);
+	}
+	flush();
+
+	// No markers at all → render the whole reply as one markdown message.
+	if (!sawMarker) return s ? [{ type: "message", text: s }] : [];
+	return envs;
+}
+
+/**
+ * Markdown rendering of envelopes for the transcript (saved chats + session
+ * restore). Choices become a numbered list so restored single-choice questions
+ * are re-decorated as clickable by decorateOptions.
+ */
+function envelopesToTranscript(envs: ResponseEnvelope[]): string {
+	return envs
+		.map((env) => {
+			if (env.type === "message") return env.text.trim();
+			const list = env.options.map((o, i) => `${i + 1}. ${o}`).join("\n");
+			return `${env.text.trim()}\n\n${list}`;
+		})
+		.filter(Boolean)
+		.join("\n\n");
+}
+
 interface ToolBlock {
 	root: HTMLElement;
 	header: HTMLElement;
@@ -55,6 +144,9 @@ export class LlmChatView extends ItemView {
 	private rafPending = false;
 	private streaming = false;
 	private workingEl: HTMLElement | null = null;
+	// True when the active persona requests a structured response envelope; the
+	// assistant message is then buffered and parsed instead of streamed as text.
+	private structuredResponse = false;
 
 	// Page (and optional selection) attached via the "ask about" context menu,
 	// prepended to the next message.
@@ -497,6 +589,7 @@ export class LlmChatView extends ItemView {
 
 		// A selected persona replaces AGENTS.md as the system prompt for this session.
 		const personaFile = this.plugin.resolvePersonaPromptFile();
+		this.structuredResponse = this.plugin.getSelectedPersona()?.responseSchema === true;
 		this.session.engine = engine;
 		this.session.persona = s.selectedPersona;
 		const resumeSessionId = this.session.engineSessionId;
@@ -920,7 +1013,9 @@ export class LlmChatView extends ItemView {
 			case "text-delta":
 				if (!this.currentTextEl) this.currentTextEl = this.newAssistantTextBlock();
 				this.currentText += ev.delta;
-				this.scheduleRender();
+				// For structured personas the deltas are raw JSON; don't render them
+				// live — buffer and parse on completion (working indicator stays up).
+				if (!this.structuredResponse) this.scheduleRender();
 				break;
 			case "text-end":
 				if (typeof ev.content === "string") this.currentText = ev.content;
@@ -1231,6 +1326,62 @@ export class LlmChatView extends ItemView {
 		void this.submitMessage(reply);
 	}
 
+	// --------------------------------------------- structured (schema) responses
+
+	/** Render a sequence of response envelopes: text, single-choice, multi-choice. */
+	private renderStructuredInto(body: HTMLElement, envs: ResponseEnvelope[]): void {
+		body.empty();
+		for (const env of envs) {
+			if (env.text) {
+				const textEl = body.createDiv({ cls: "llm-structured-text" });
+				this.renderMarkdownInto(textEl, env.text);
+			}
+			if (env.type === "single_choice") {
+				const ol = body.createEl("ol", { cls: "llm-options" });
+				for (const opt of env.options) {
+					const li = ol.createEl("li", { cls: "llm-option", text: opt });
+					li.setAttribute("role", "button");
+					li.setAttribute("tabindex", "0");
+					const choose = () => this.chooseOption(ol, li, opt);
+					li.addEventListener("click", choose);
+					li.addEventListener("keydown", (e) => {
+						if (e.key === "Enter" || e.key === " ") {
+							e.preventDefault();
+							choose();
+						}
+					});
+				}
+			} else if (env.type === "multi_choice") {
+				this.renderMultiChoice(body, env.options);
+			}
+		}
+		this.scrollToBottom();
+	}
+
+	/** Checkbox list plus a Send button; submits the chosen option texts together. */
+	private renderMultiChoice(body: HTMLElement, options: string[]): void {
+		const wrap = body.createDiv({ cls: "llm-multi" });
+		const boxes: HTMLInputElement[] = [];
+		for (const opt of options) {
+			const label = wrap.createEl("label", { cls: "llm-multi-option" });
+			boxes.push(label.createEl("input", { type: "checkbox" }));
+			label.createSpan({ text: opt });
+		}
+		const send = wrap.createEl("button", { cls: "llm-multi-send", text: "Send" });
+		send.addEventListener("click", () => {
+			if (wrap.classList.contains("llm-options-answered")) return;
+			const chosen = options.filter((_, i) => boxes[i].checked);
+			if (chosen.length === 0) {
+				new Notice("Select at least one option (or type your own reply).");
+				return;
+			}
+			wrap.classList.add("llm-options-answered");
+			boxes.forEach((b) => (b.disabled = true));
+			send.disabled = true;
+			void this.submitMessage(chosen.join("\n"));
+		});
+	}
+
 	// ------------------------------------------------- vault page path linking
 
 	/**
@@ -1330,10 +1481,19 @@ export class LlmChatView extends ItemView {
 
 	private finalizeText(): void {
 		if (this.currentTextEl) {
-			this.renderMarkdownInto(this.currentTextEl, this.currentText, true);
-			if (this.currentText.trim()) {
-				this.session.transcript.push({ role: "assistant", text: this.currentText });
+			const envs = this.structuredResponse ? parseResponseEnvelopes(this.currentText) : [];
+			if (envs.length) {
+				this.renderStructuredInto(this.currentTextEl, envs);
+				this.session.transcript.push({ role: "assistant", text: envelopesToTranscript(envs) });
 				this.afterTranscriptChange();
+			} else {
+				// Plain message, or a structured persona whose output didn't parse —
+				// fall back to rendering the raw text as markdown.
+				this.renderMarkdownInto(this.currentTextEl, this.currentText, true);
+				if (this.currentText.trim()) {
+					this.session.transcript.push({ role: "assistant", text: this.currentText });
+					this.afterTranscriptChange();
+				}
 			}
 		}
 		this.currentTextEl = null;
