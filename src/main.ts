@@ -1,17 +1,44 @@
 import { Editor, FileSystemAdapter, MarkdownFileInfo, Menu, Notice, Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import { VIEW_TYPE, LlmChatView } from "./chat-view";
 import { DEFAULT_SETTINGS, LlmAgentSettingTab, LlmAgentSettings } from "./settings";
-import { PromptStore } from "./prompts";
 import { SessionStore } from "./sessions";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
+
+/** A reusable, one-click prompt shown as a button in the panel. */
+export interface QuickPrompt {
+	label: string;
+	prompt: string;
+}
 
 export interface Persona {
 	path: string;
 	name: string;
 	/** When true, the agent is asked to reply with a structured response envelope. */
 	responseSchema?: boolean;
+	/** One-click prompts declared in the persona's frontmatter. */
+	prompts: QuickPrompt[];
+}
+
+/** Parse a persona's frontmatter `prompts:` list into QuickPrompts (tolerant). */
+function parsePersonaPrompts(raw: unknown): QuickPrompt[] {
+	if (!Array.isArray(raw)) return [];
+	const out: QuickPrompt[] = [];
+	for (const item of raw) {
+		if (typeof item === "string") {
+			const s = item.trim();
+			if (s) out.push({ label: s.length > 40 ? s.slice(0, 40) + "…" : s, prompt: s });
+			continue;
+		}
+		if (!item || typeof item !== "object") continue;
+		const o = item as Record<string, unknown>;
+		const prompt = typeof o.prompt === "string" ? o.prompt : typeof o.text === "string" ? o.text : "";
+		const label = typeof o.label === "string" && o.label.trim() ? o.label.trim() : prompt.trim().slice(0, 40);
+		if (!label && !prompt) continue;
+		out.push({ label: label || "(unnamed)", prompt });
+	}
+	return out;
 }
 
 /**
@@ -60,7 +87,6 @@ Rules:
 
 export default class LlmAgentPlugin extends Plugin {
 	declare settings: LlmAgentSettings;
-	promptStore!: PromptStore;
 	sessionStore!: SessionStore;
 
 	// Auto-run batching: paths created in the watch folder, plus a debounce timer.
@@ -70,17 +96,16 @@ export default class LlmAgentPlugin extends Plugin {
 	async onload(): Promise<void> {
 		await this.loadSettings();
 
-		this.promptStore = new PromptStore(this.app, () => this.settings.promptsFile);
-		await this.promptStore.load();
-
 		const pluginDir = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
 		this.sessionStore = new SessionStore(this.app, pluginDir);
 		await this.sessionStore.load();
 
-		// Live-reload standard prompts when the JSON file is edited in the vault.
+		// Personas (and their one-click prompts) live in vault-root markdown
+		// frontmatter; rebuild open panels' persona dropdown + quick-prompt bar
+		// whenever a file's metadata changes.
 		this.registerEvent(
-			this.app.vault.on("modify", (file: TAbstractFile) => {
-				if (file.path === this.promptStore.fileName) void this.refreshPrompts();
+			this.app.metadataCache.on("changed", (file: TFile) => {
+				if (!file.path.includes("/")) this.refreshOpenViews();
 			})
 		);
 
@@ -269,7 +294,8 @@ export default class LlmAgentPlugin extends Plugin {
 					f.basename;
 				const schema = fm.responseSchema ?? fm.response_schema ?? fm.RESPONSE_SCHEMA;
 				const responseSchema = schema === true || schema === "true";
-				out.push({ path: f.path, name, responseSchema });
+				const prompts = parsePersonaPrompts(fm.prompts);
+				out.push({ path: f.path, name, responseSchema, prompts });
 			}
 		}
 		out.sort((a, b) => a.name.localeCompare(b.name));
@@ -311,16 +337,10 @@ export default class LlmAgentPlugin extends Plugin {
 		}
 	}
 
-	/** Reload prompts from the vault file and update any open panels. */
-	async refreshPrompts(): Promise<void> {
-		await this.promptStore.load();
-		this.refreshOpenViews();
-	}
-
-	/** Tell every open LLM Agent panel to rebuild its quick-prompt bar. */
+	/** Tell every open LLM Agent panel to rebuild its persona dropdown + prompts. */
 	refreshOpenViews(): void {
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
-			if (leaf.view instanceof LlmChatView) leaf.view.reloadPrompts();
+			if (leaf.view instanceof LlmChatView) leaf.view.reloadPersonas();
 		}
 	}
 

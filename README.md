@@ -99,29 +99,29 @@ agent to commit each time, or to push when you're ready. Git runs directly in th
 vault (credential prompts are disabled, so a push needing fresh credentials fails
 fast with a notice rather than hanging).
 
-### Standard prompts (one-click buttons)
+### Quick prompts (one-click buttons)
 
-The bar above the input holds reusable prompts you can fire with a single click
-(e.g. *Lint wiki*, *Ingest raw/*, *Refresh index*). They are stored as JSON in a
-file at your **vault root** — `llm-agent-prompts.json` by default:
+The bar above the input holds reusable prompts you can fire with a single click.
+They are **defined per persona** in the persona file's frontmatter, so each
+persona shows its own relevant buttons (and the *Default (AGENTS.md)* mode shows
+none). Add a `prompts:` list to the persona's frontmatter:
 
-```json
-{
-  "prompts": [
-    { "id": "lint", "label": "Lint wiki", "prompt": "Lint and audit the wiki…" }
-  ]
-}
+```markdown
+---
+PERSONA: true
+name: Vault-Quiz
+prompts:
+  - label: Nächste Frage
+    prompt: Stelle die nächste Quizfrage.
+  - label: Punktestand
+    prompt: Zeige mir meinen aktuellen Punktestand.
+---
 ```
 
-Manage them two ways, both backed by the same file:
-
-- **Settings → LLM Agent → Standard prompts** — add, edit the label/text, delete,
-  and save.
-- **Edit the JSON file directly** in the vault — the panel buttons reload
-  automatically when the file changes.
-
-Clicking a button sends its prompt immediately (and *steers* pi if it's already
-running). The file name is configurable in settings.
+Each entry has a short `label` (the button text) and the `prompt` sent when
+clicked. The bar updates automatically when you edit the persona file or switch
+persona. Clicking a button sends its prompt immediately (and *steers* the engine
+if it's already running).
 
 ## Saving a chat
 
@@ -244,7 +244,6 @@ the vault at startup do **not** trigger it — only genuinely new ones.
 | Persist sessions | Save conversations to pi's session store so they can be resumed. |
 | Show thinking | Display the agent's reasoning blocks. |
 | Tool permission dialogs | Ask / always allow / always block confirmation prompts pi raises (and Claude's permission asks). |
-| Prompts file | Vault-root JSON file holding the one-click standard prompts. |
 | Run on new file / Watch folder / Prompt | Auto-run a prompt when files appear in a watched folder (see Automation above). |
 | Claude command | Command/path to the Claude Code CLI (default `claude`). |
 | Claude model | `default` / Opus / Sonnet / Haiku. |

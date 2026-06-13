@@ -545,15 +545,17 @@ export class LlmChatView extends ItemView {
 		this.sendBtn.addEventListener("click", () => this.onSend());
 	}
 
-	/** Rebuild the quick-prompt button bar from the plugin's prompt store. */
-	reloadPrompts(): void {
+	/** Rebuild the persona dropdown and quick-prompt bar (personas changed on disk). */
+	reloadPersonas(): void {
+		this.renderPersonaSelect();
 		this.renderQuickPrompts();
 	}
 
+	/** Quick-prompt buttons come from the active persona's frontmatter `prompts:`. */
 	private renderQuickPrompts(): void {
 		if (!this.quickBarEl) return;
 		this.quickBarEl.empty();
-		const prompts = this.plugin.promptStore.getAll();
+		const prompts = this.plugin.getSelectedPersona()?.prompts ?? [];
 		if (prompts.length === 0) {
 			this.quickBarEl.hide();
 			return;
@@ -564,7 +566,7 @@ export class LlmChatView extends ItemView {
 			if (p.prompt) btn.setAttribute("aria-label", p.prompt);
 			btn.addEventListener("click", () => {
 				if (!p.prompt.trim()) {
-					new Notice(`Standard prompt "${p.label}" has no text.`);
+					new Notice(`Prompt "${p.label}" has no text.`);
 					return;
 				}
 				void this.submitMessage(p.prompt);
@@ -586,6 +588,7 @@ export class LlmChatView extends ItemView {
 		const engine = s.engine;
 		this.engineSelect.value = engine;
 		this.renderPersonaSelect();
+		this.renderQuickPrompts();
 
 		// A selected persona replaces AGENTS.md as the system prompt for this session.
 		const personaFile = this.plugin.resolvePersonaPromptFile();

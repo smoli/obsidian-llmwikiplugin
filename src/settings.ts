@@ -1,7 +1,6 @@
-import { App, Notice, PluginSettingTab, Setting } from "obsidian";
+import { App, PluginSettingTab, Setting } from "obsidian";
 import type LlmAgentPlugin from "./main";
 import { ThinkingLevel } from "./rpc-types";
-import { StandardPrompt, makeId } from "./prompts";
 
 export interface LlmAgentSettings {
 	/** Which agent engine to drive: pi or the Claude Code CLI. */
@@ -29,8 +28,6 @@ export interface LlmAgentSettings {
 	 * extensions: ask the user, always allow, or always block.
 	 */
 	dialogPolicy: "ask" | "allow" | "block";
-	/** Name of the JSON file (at the vault root) holding standard prompts. */
-	promptsFile: string;
 
 	// --- Automation: run a prompt when files land in a watched folder ---
 	/** Enable auto-running a prompt when new files appear in the watch folder. */
@@ -70,7 +67,6 @@ export const DEFAULT_SETTINGS: LlmAgentSettings = {
 	persistSession: true,
 	showThinking: false,
 	dialogPolicy: "ask",
-	promptsFile: "llm-agent-prompts.json",
 	claudePath: "claude",
 	claudePermissionMode: "bypassPermissions",
 	claudeModel: "default",
@@ -353,108 +349,14 @@ export class LlmAgentSettingTab extends PluginSettingTab {
 				});
 			});
 
-		// ----- standard prompts -----
-		containerEl.createEl("h3", { text: "Standard prompts" });
+		// ----- personas / prompts -----
+		containerEl.createEl("h3", { text: "Personas & prompts" });
 		containerEl.createEl("p", {
 			text:
-				"One-click prompts shown as buttons in the panel. Stored as JSON in your vault root — you can also edit that file directly.",
+				"One-click prompts are now defined per persona, in the persona file's frontmatter " +
+				"(a vault-root markdown file with `PERSONA: true`). Add a `prompts:` list of " +
+				"`label`/`prompt` entries; its buttons appear in the panel while that persona is active.",
 			cls: "setting-item-description",
 		});
-
-		new Setting(containerEl)
-			.setName("Prompts file")
-			.setDesc("File name (relative to the vault root) where standard prompts are stored.")
-			.addText((t) =>
-				t
-					.setPlaceholder("llm-agent-prompts.json")
-					.setValue(this.plugin.settings.promptsFile)
-					.onChange(async (v) => {
-						this.plugin.settings.promptsFile = v.trim() || "llm-agent-prompts.json";
-						await this.plugin.saveSettings();
-					})
-			)
-			.addExtraButton((b) =>
-				b
-					.setIcon("refresh-cw")
-					.setTooltip("Reload from file")
-					.onClick(async () => {
-						await this.plugin.refreshPrompts();
-						this.display();
-					})
-			);
-
-		const listEl = containerEl.createDiv({ cls: "llm-prompts-settings" });
-		void this.renderPromptList(listEl);
-	}
-
-	private async renderPromptList(containerEl: HTMLElement): Promise<void> {
-		containerEl.empty();
-		const store = this.plugin.promptStore;
-		if (!store.isLoaded()) await store.load();
-		const prompts = store.getAll();
-
-		if (prompts.length === 0) {
-			containerEl.createEl("p", {
-				text: "No standard prompts yet.",
-				cls: "setting-item-description",
-			});
-		}
-
-		prompts.forEach((p, index) => {
-			const row = containerEl.createDiv({ cls: "llm-prompt-edit" });
-
-			new Setting(row)
-				.setName(`Prompt ${index + 1}`)
-				.addText((t) =>
-					t
-						.setPlaceholder("Button label")
-						.setValue(p.label)
-						.onChange((v) => {
-							p.label = v;
-						})
-				)
-				.addExtraButton((b) =>
-					b
-						.setIcon("trash")
-						.setTooltip("Delete")
-						.onClick(async () => {
-							const next = prompts.filter((x) => x.id !== p.id);
-							await this.persist(next);
-							await this.renderPromptList(containerEl);
-						})
-				);
-
-			const ta = row.createEl("textarea", {
-				cls: "llm-prompt-text",
-				attr: { rows: "3", placeholder: "Prompt text sent to pi…" },
-			});
-			ta.value = p.prompt;
-			ta.addEventListener("change", () => {
-				p.prompt = ta.value;
-			});
-		});
-
-		const actions = containerEl.createDiv({ cls: "llm-prompts-actions" });
-
-		const addBtn = actions.createEl("button", { text: "Add prompt" });
-		addBtn.addEventListener("click", async () => {
-			const next: StandardPrompt[] = [
-				...prompts,
-				{ id: makeId(), label: "New prompt", prompt: "" },
-			];
-			await this.persist(next);
-			await this.renderPromptList(containerEl);
-		});
-
-		const saveBtn = actions.createEl("button", { cls: "mod-cta", text: "Save prompts" });
-		saveBtn.addEventListener("click", async () => {
-			await this.persist(prompts);
-			new Notice("Standard prompts saved.");
-		});
-	}
-
-	private async persist(prompts: StandardPrompt[]): Promise<void> {
-		await this.plugin.promptStore.save(prompts);
-		this.plugin.refreshOpenViews();
 	}
 }
