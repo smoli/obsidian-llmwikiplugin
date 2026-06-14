@@ -64,21 +64,25 @@ Header controls:
 
 - **Model dropdown** — switch the LLM live (any provider pi has credentials for).
 - **Thinking dropdown** — reasoning effort.
-- **history icon** — session list: switch to a previous session, or rename/delete
-  the current one (see Sessions below).
+- **sidebar icon** — show/hide the session sidebar (see Sessions below).
 - **+** — start a fresh session (the previous one is kept, not discarded).
 - **■** — stop the current run. Sending while pi is running *steers* it.
 
 ### Sessions
 
-Each conversation is a session. Clicking **+** starts a new one **without losing
-the old** — past sessions are listed under the **history** button, newest first.
-Selecting one restores its transcript and **resumes the conversation in the engine**
-(via `--resume` for Claude / `--session` for pi), so the agent remembers the
-context. Sessions are named automatically from the first message (rename/delete via
-the history menu) and persist across Obsidian restarts (stored in the plugin's
-config folder, not in your vault). Switching engine or persona starts a new session,
-since those change the system prompt / engine the conversation lives in.
+Each conversation is a session, listed in a **sidebar** on the left of the panel
+(toggle it with the sidebar icon in the header). The active session is
+highlighted; click any other to switch to it — its transcript is restored and the
+conversation **resumes in the engine** (via `--resume` for Claude / `--session`
+for pi), so the agent remembers the context. Clicking **+** (in the header or the
+sidebar) starts a new session **without losing the old**.
+
+Each row has **rename** and **delete** buttons on hover; right-click a row for the
+same actions plus *Delete all other sessions*. Sessions are named automatically
+from the first message and persist across Obsidian restarts (stored in the
+plugin's config folder, not in your vault). Switching engine or persona starts a
+new session, since those change the system prompt / engine the conversation lives
+in.
 
 ### Git actions
 

@@ -117,11 +117,33 @@ interface ToolBlock {
 	titleEl: HTMLElement;
 }
 
+/** "5s" / "12m 49s" / "1h 03m". */
+function formatDuration(totalSec: number): string {
+	if (totalSec < 60) return `${totalSec}s`;
+	const m = Math.floor(totalSec / 60);
+	const s = totalSec % 60;
+	if (m < 60) return `${m}m ${String(s).padStart(2, "0")}s`;
+	const h = Math.floor(m / 60);
+	return `${h}h ${String(m % 60).padStart(2, "0")}m`;
+}
+
+/** Compact token count: "920" / "13.4k" / "1.2M". */
+function formatTokens(n: number): string {
+	if (n < 1000) return String(n);
+	const k = n / 1000;
+	if (k < 100) return `${k.toFixed(1)}k`;
+	if (k < 1000) return `${Math.round(k)}k`;
+	return `${(n / 1e6).toFixed(1)}M`;
+}
+
 export class LlmChatView extends ItemView {
 	private backend: AgentBackend | null = null;
 	private models: BackendModel[] = [];
 
 	// DOM
+	private mainEl!: HTMLElement;
+	private sidebarEl!: HTMLElement;
+	private sessionListEl!: HTMLElement;
 	private transcriptEl!: HTMLElement;
 	private inputEl!: HTMLTextAreaElement;
 	private quickBarEl!: HTMLElement;
@@ -144,6 +166,11 @@ export class LlmChatView extends ItemView {
 	private rafPending = false;
 	private streaming = false;
 	private workingEl: HTMLElement | null = null;
+	// Working-indicator live meta (elapsed time + token count) for the current run.
+	private runStartMs = 0;
+	private runTokens = 0;
+	private workingTimer: number | null = null;
+	private statsPolling = false;
 	// True when the active persona requests a structured response envelope; the
 	// assistant message is then buffered and parsed instead of streamed as text.
 	private structuredResponse = false;
@@ -179,25 +206,34 @@ export class LlmChatView extends ItemView {
 		this.contentEl.empty();
 		this.contentEl.addClass("llm-agent-view");
 		this.session = this.makeSession();
+
+		// Two columns: a session sidebar and the chat itself.
+		this.sidebarEl = this.contentEl.createDiv({ cls: "llm-sidebar" });
+		this.mainEl = this.contentEl.createDiv({ cls: "llm-main" });
+		this.buildSidebar();
+		this.applySidebarState();
+
 		this.buildHeader();
-		this.transcriptEl = this.contentEl.createDiv({ cls: "llm-transcript" });
-		this.quickBarEl = this.contentEl.createDiv({ cls: "llm-quickbar" });
+		this.transcriptEl = this.mainEl.createDiv({ cls: "llm-transcript" });
+		this.quickBarEl = this.mainEl.createDiv({ cls: "llm-quickbar" });
 		this.renderQuickPrompts();
-		this.contextEl = this.contentEl.createDiv({ cls: "llm-context" });
+		this.contextEl = this.mainEl.createDiv({ cls: "llm-context" });
 		this.contextEl.hide();
 		this.buildInput();
+		this.renderSessionList();
 		await this.connect();
 	}
 
 	async onClose(): Promise<void> {
 		void this.plugin.sessionStore.flush();
+		this.stopWorkingTimer();
 		this.teardownBackend();
 	}
 
 	// ---------------------------------------------------------------- layout
 
 	private buildHeader(): void {
-		const header = this.contentEl.createDiv({ cls: "llm-header" });
+		const header = this.mainEl.createDiv({ cls: "llm-header" });
 
 		this.engineSelect = header.createEl("select", { cls: "llm-select llm-engine-select" });
 		this.engineSelect.createEl("option", { text: "pi", value: "pi" });
@@ -225,9 +261,9 @@ export class LlmChatView extends ItemView {
 		const spacer = header.createDiv({ cls: "llm-header-spacer" });
 		spacer.style.flex = "1";
 
-		const sessionsBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "Sessions" } });
-		setIcon(sessionsBtn, "history");
-		sessionsBtn.addEventListener("click", (e) => this.openSessionMenu(e));
+		const sessionsBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "Toggle sessions sidebar" } });
+		setIcon(sessionsBtn, "panel-left");
+		sessionsBtn.addEventListener("click", () => this.toggleSidebar());
 
 		this.newBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "New session" } });
 		setIcon(this.newBtn, "plus");
@@ -248,7 +284,7 @@ export class LlmChatView extends ItemView {
 			gitBtn.addEventListener("click", (e) => this.openGitMenu(e));
 		}
 
-		this.statusEl = this.contentEl.createDiv({ cls: "llm-status" });
+		this.statusEl = this.mainEl.createDiv({ cls: "llm-status" });
 	}
 
 	private async onEngineChange(): Promise<void> {
@@ -530,7 +566,7 @@ export class LlmChatView extends ItemView {
 	}
 
 	private buildInput(): void {
-		const wrap = this.contentEl.createDiv({ cls: "llm-input-row" });
+		const wrap = this.mainEl.createDiv({ cls: "llm-input-row" });
 		this.inputEl = wrap.createEl("textarea", {
 			cls: "llm-input",
 			attr: { placeholder: "Ask the agent about your wiki… (Enter to send, Shift+Enter for newline)", rows: "3" },
@@ -595,9 +631,10 @@ export class LlmChatView extends ItemView {
 		this.renderQuickPrompts();
 
 		// A selected persona replaces AGENTS.md as the system prompt for this session.
+		// The persona / AGENTS.md prompt file already has the fixed instructions
+		// (path:line linking, schema protocol) baked in — Claude only honors a
+		// single append file, so we never pass a second one.
 		const personaFile = this.plugin.resolvePersonaPromptFile();
-		// Fixed instructions appended every session (e.g. path:line linking).
-		const instructionFile = this.plugin.resolveFixedInstructionFile();
 		this.structuredResponse = this.plugin.getSelectedPersona()?.responseSchema === true;
 		this.session.engine = engine;
 		this.session.persona = s.selectedPersona;
@@ -609,9 +646,12 @@ export class LlmChatView extends ItemView {
 				cwd,
 				model: s.claudeModel || "default",
 				permissionMode: s.claudePermissionMode,
-				agentsFile: personaFile ?? this.plugin.resolveAgentsPromptFile() ?? undefined,
+				agentsFile:
+					personaFile ??
+					this.plugin.resolveAgentsPromptFile() ??
+					this.plugin.resolveFixedInstructionFile() ??
+					undefined,
 				agentsMode: s.claudeAgentsMode,
-				appendPromptFile: instructionFile ?? undefined,
 				resumeSessionId,
 			});
 		} else {
@@ -625,11 +665,9 @@ export class LlmChatView extends ItemView {
 				thinking: s.thinking,
 				persistSession: s.persistSession,
 				disableContextFiles: true,
-				appendSystemPromptFiles: [
-					this.plugin.resolveAgentsPromptFile(),
-					personaFile,
-					instructionFile,
-				].filter((f): f is string => !!f),
+				appendSystemPromptFiles: [this.plugin.resolveAgentsPromptFile(), personaFile].filter(
+					(f): f is string => !!f
+				),
 				resumeSessionId,
 			});
 		}
@@ -794,6 +832,7 @@ export class LlmChatView extends ItemView {
 		this.clearConversationDom();
 		this.teardownBackend();
 		await this.connect();
+		this.renderSessionList();
 		this.setStatus("New session.");
 	}
 
@@ -813,67 +852,128 @@ export class LlmChatView extends ItemView {
 		this.renderTranscriptFromSession();
 		this.teardownBackend();
 		await this.connect();
+		this.renderSessionList();
 		this.setStatus(`Session: ${target.name || "Untitled"}`);
 	}
 
-	private openSessionMenu(evt: MouseEvent): void {
-		const menu = new Menu();
-		menu.addItem((i) => i.setTitle("New session").setIcon("plus").onClick(() => void this.startNewSession()));
+	// ----------------------------------------------------------- session sidebar
 
-		const sessions = this.plugin.sessionStore.getAll();
-		if (sessions.length) {
-			menu.addSeparator();
-			for (const s of sessions.slice(0, 25)) {
-				menu.addItem((i) => {
-					i.setTitle(s.name || "Untitled").onClick(() => void this.switchSession(s.id));
-					if (s.id === this.session.id) i.setChecked(true);
-				});
-			}
+	private buildSidebar(): void {
+		const head = this.sidebarEl.createDiv({ cls: "llm-sidebar-head" });
+		head.createSpan({ cls: "llm-sidebar-title", text: "Sessions" });
+		const newBtn = head.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "New session" } });
+		setIcon(newBtn, "plus");
+		newBtn.addEventListener("click", () => void this.startNewSession());
+
+		this.sessionListEl = this.sidebarEl.createDiv({ cls: "llm-sidebar-list" });
+	}
+
+	private toggleSidebar(): void {
+		this.plugin.settings.sidebarCollapsed = !this.plugin.settings.sidebarCollapsed;
+		void this.plugin.saveSettings();
+		this.applySidebarState();
+	}
+
+	private applySidebarState(): void {
+		this.sidebarEl.toggleClass("is-collapsed", this.plugin.settings.sidebarCollapsed);
+	}
+
+	/** Rebuild the session list. The active session is always shown (even before
+	 *  it is persisted), highlighted, newest first. */
+	private renderSessionList(): void {
+		if (!this.sessionListEl) return;
+		this.sessionListEl.empty();
+
+		const saved = this.plugin.sessionStore.getAll();
+		const list = saved.some((s) => s.id === this.session.id) ? saved.slice() : [this.session, ...saved];
+
+		if (list.length === 0) {
+			this.sessionListEl.createDiv({ cls: "llm-session-empty", text: "No sessions yet." });
+			return;
 		}
 
-		menu.addSeparator();
-		menu.addItem((i) => i.setTitle("Rename current…").setIcon("pencil").onClick(() => void this.renameCurrentSession()));
-		menu.addItem((i) => i.setTitle("Delete current").setIcon("trash").onClick(() => void this.deleteCurrentSession()));
-		const others = sessions.filter((s) => s.id !== this.session.id).length;
+		for (const s of list) {
+			const active = s.id === this.session.id;
+			const item = this.sessionListEl.createDiv({ cls: "llm-session-item" + (active ? " is-active" : "") });
+			item.addEventListener("click", () => void this.switchSession(s.id));
+			item.addEventListener("contextmenu", (e) => this.openSessionItemMenu(e, s.id));
+
+			const body = item.createDiv({ cls: "llm-session-body" });
+			body.createDiv({ cls: "llm-session-name", text: s.name || "New chat" });
+			const meta = [this.plugin.engineLabel(), s.model].filter(Boolean).join(" · ");
+			if (meta) body.createDiv({ cls: "llm-session-meta", text: meta });
+
+			const actions = item.createDiv({ cls: "llm-session-actions" });
+			const rename = actions.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "Rename" } });
+			setIcon(rename, "pencil");
+			rename.addEventListener("click", (e) => {
+				e.stopPropagation();
+				void this.renameSession(s.id);
+			});
+			const del = actions.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "Delete" } });
+			setIcon(del, "trash");
+			del.addEventListener("click", (e) => {
+				e.stopPropagation();
+				void this.deleteSession(s.id);
+			});
+		}
+	}
+
+	private openSessionItemMenu(evt: MouseEvent, id: string): void {
+		evt.preventDefault();
+		const menu = new Menu();
+		menu.addItem((i) => i.setTitle("Rename…").setIcon("pencil").onClick(() => void this.renameSession(id)));
+		menu.addItem((i) => i.setTitle("Delete").setIcon("trash").onClick(() => void this.deleteSession(id)));
+		const others = this.plugin.sessionStore.getAll().filter((s) => s.id !== id).length;
 		if (others > 0) {
+			menu.addSeparator();
 			menu.addItem((i) =>
 				i
 					.setTitle("Delete all other sessions")
 					.setIcon("trash-2")
-					.onClick(() => void this.deleteOtherSessions())
+					.onClick(() => void this.deleteOtherSessions(id))
 			);
 		}
 		menu.showAtMouseEvent(evt);
 	}
 
-	private async renameCurrentSession(): Promise<void> {
-		const req: ExtensionUIRequest = {
+	/** The live session object for an id (the active one may not be persisted yet). */
+	private sessionById(id: string): SavedSession | undefined {
+		return id === this.session.id ? this.session : this.plugin.sessionStore.get(id);
+	}
+
+	private async renameSession(id: string): Promise<void> {
+		const target = this.sessionById(id);
+		if (!target) return;
+		const answer = await showUIDialog(this.app, {
 			type: "extension_ui_request",
 			id: "rename-session",
 			method: "input",
 			title: "Rename session",
-			prefill: this.session.name,
-		};
-		const answer = await showUIDialog(this.app, req);
+			prefill: target.name,
+		});
 		if (answer.cancelled) return;
-		const name = (typeof answer.value === "string" && answer.value.trim()) || this.session.name;
-		this.session.name = name;
-		this.session.updatedAt = Date.now();
-		if (this.session.transcript.length) this.plugin.sessionStore.upsert(this.session);
-		this.setStatus(`Renamed: ${name}`);
+		target.name = (typeof answer.value === "string" && answer.value.trim()) || target.name;
+		target.updatedAt = Date.now();
+		if (target.transcript.length) this.plugin.sessionStore.upsert(target);
+		this.renderSessionList();
 	}
 
-	private async deleteCurrentSession(): Promise<void> {
+	private async deleteSession(id: string): Promise<void> {
 		if (this.isBusy("deleting the session")) return;
-		this.plugin.sessionStore.remove(this.session.id);
-		await this.startFreshSession();
-		this.setStatus("Session deleted.");
+		this.plugin.sessionStore.remove(id);
+		if (id === this.session.id) {
+			await this.startFreshSession();
+		} else {
+			this.renderSessionList();
+			this.setStatus("Session deleted.");
+		}
 	}
 
-	/** Delete every saved session except the current one (with confirmation). */
-	private async deleteOtherSessions(): Promise<void> {
+	/** Delete every saved session except the given one (with confirmation). */
+	private async deleteOtherSessions(keepId: string): Promise<void> {
 		if (this.isBusy("deleting sessions")) return;
-		const others = this.plugin.sessionStore.getAll().filter((s) => s.id !== this.session.id).length;
+		const others = this.plugin.sessionStore.getAll().filter((s) => s.id !== keepId).length;
 		if (others === 0) {
 			new Notice("No other sessions to delete.");
 			return;
@@ -886,7 +986,12 @@ export class LlmChatView extends ItemView {
 			message: `This permanently removes ${others} other session${others === 1 ? "" : "s"}, keeping only the current one. This cannot be undone.`,
 		});
 		if (answer.confirmed !== true) return;
-		const removed = this.plugin.sessionStore.keepOnly(this.session.id);
+		const removed = this.plugin.sessionStore.keepOnly(keepId);
+		// Keeping a non-active session deletes the active one — switch to the kept one.
+		if (keepId !== this.session.id) {
+			await this.switchSession(keepId);
+		}
+		this.renderSessionList();
 		this.setStatus(`Deleted ${removed} other session${removed === 1 ? "" : "s"}.`);
 	}
 
@@ -915,6 +1020,7 @@ export class LlmChatView extends ItemView {
 		this.session.model = this.modelSelect.selectedOptions[0]?.text || this.session.model;
 		this.session.updatedAt = Date.now();
 		this.plugin.sessionStore.upsert(this.session);
+		this.renderSessionList();
 	}
 
 	private async captureSessionId(): Promise<void> {
@@ -1018,7 +1124,10 @@ export class LlmChatView extends ItemView {
 			case "run-start":
 				this.streaming = true;
 				this.resetStreamState();
+				this.runStartMs = Date.now();
+				this.runTokens = 0;
 				this.showWorking();
+				this.startWorkingTimer();
 				this.refreshSendState();
 				break;
 
@@ -1078,6 +1187,10 @@ export class LlmChatView extends ItemView {
 				break;
 			case "stats":
 				this.renderStats(ev.stats);
+				if (ev.stats.tokensTotal) {
+					this.runTokens = ev.stats.tokensTotal;
+					this.updateWorkingMeta();
+				}
 				break;
 			case "notice":
 				new Notice(ev.message);
@@ -1144,15 +1257,68 @@ export class LlmChatView extends ItemView {
 	private showWorking(): void {
 		if (!this.workingEl) {
 			this.workingEl = this.transcriptEl.createDiv({ cls: "llm-working", attr: { "aria-label": "Working" } });
-			for (let i = 0; i < 3; i++) this.workingEl.createSpan({ cls: "llm-working-dot" });
+			const dots = this.workingEl.createDiv({ cls: "llm-working-dots" });
+			for (let i = 0; i < 3; i++) dots.createSpan({ cls: "llm-working-dot" });
+			this.workingEl.createSpan({ cls: "llm-working-meta" });
 		}
+		this.updateWorkingMeta();
 		this.transcriptEl.appendChild(this.workingEl); // keep it last
 		this.scrollToBottom();
 	}
 
 	private hideWorking(): void {
+		this.stopWorkingTimer();
+		this.runStartMs = 0;
 		this.workingEl?.remove();
 		this.workingEl = null;
+	}
+
+	/** Tick the working indicator's elapsed time every second and poll token usage. */
+	private startWorkingTimer(): void {
+		this.stopWorkingTimer();
+		this.workingTimer = window.setInterval(() => {
+			this.updateWorkingMeta();
+			// Poll usage every other tick (pi answers via RPC; Claude reads a cache).
+			if (this.runStartMs && Math.floor((Date.now() - this.runStartMs) / 1000) % 2 === 0) {
+				void this.pollRunTokens();
+			}
+		}, 1000);
+	}
+
+	private stopWorkingTimer(): void {
+		if (this.workingTimer != null) {
+			window.clearInterval(this.workingTimer);
+			this.workingTimer = null;
+		}
+	}
+
+	/** Repaint the elapsed-time · token-count line on the working indicator. */
+	private updateWorkingMeta(): void {
+		const meta = this.workingEl?.querySelector(".llm-working-meta") as HTMLElement | null;
+		if (!meta) return;
+		if (!this.runStartMs) {
+			meta.textContent = "";
+			return;
+		}
+		const parts = [formatDuration(Math.floor((Date.now() - this.runStartMs) / 1000))];
+		if (this.runTokens > 0) parts.push(`${formatTokens(this.runTokens)} tokens`);
+		meta.textContent = parts.join(" · ");
+	}
+
+	private async pollRunTokens(): Promise<void> {
+		if (this.statsPolling || !this.backend) return;
+		this.statsPolling = true;
+		try {
+			const stats = await this.backend.getStats();
+			if (stats?.tokensTotal && stats.tokensTotal !== this.runTokens) {
+				this.runTokens = stats.tokensTotal;
+				this.updateWorkingMeta();
+			}
+		} catch {
+			/* transient; ignore */
+		} finally {
+			this.statsPolling = false;
+		}
 	}
 
 	private appendUserMessage(text: string): void {

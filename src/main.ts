@@ -400,6 +400,9 @@ export default class LlmAgentPlugin extends Plugin {
 			let content = stripFrontmatter(fs.readFileSync(abs, "utf8"));
 			if (!content) return null;
 			if (this.getSelectedPersona()?.responseSchema) content += RESPONSE_SCHEMA_INSTRUCTION;
+			// A persona is always the single prompt file Claude/pi use, so bake the
+			// fixed instructions in here rather than passing a second append file.
+			content += "\n\n" + WIKI_LINE_LINK_INSTRUCTION;
 			const slug = sel.replace(/[^a-zA-Z0-9]+/g, "-");
 			const tmp = path.join(os.tmpdir(), `llm-agent-persona-${slug}.md`);
 			fs.writeFileSync(tmp, content + "\n", "utf8");
@@ -449,8 +452,12 @@ export default class LlmAgentPlugin extends Plugin {
 		const src = this.getAgentsFile();
 		if (!src) return null;
 		try {
-			const content = stripFrontmatter(fs.readFileSync(src, "utf8"));
+			let content = stripFrontmatter(fs.readFileSync(src, "utf8"));
 			if (!content) return null;
+			// Bake in the fixed instructions only when no persona is active — with a
+			// persona, the persona file already carries them (avoids duplicate text
+			// for pi, which appends both AGENTS.md and the persona).
+			if (!this.settings.selectedPersona) content += "\n\n" + WIKI_LINE_LINK_INSTRUCTION;
 			const tmp = path.join(os.tmpdir(), "llm-agent-agents.md");
 			fs.writeFileSync(tmp, content + "\n", "utf8");
 			return tmp;

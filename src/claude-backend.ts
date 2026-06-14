@@ -21,8 +21,6 @@ export interface ClaudeBackendOptions {
 	agentsFile?: string;
 	/** Append AGENTS.md to Claude's default prompt, or replace it entirely. */
 	agentsMode: "append" | "replace";
-	/** File with fixed instructions appended to the system prompt every session. */
-	appendPromptFile?: string;
 	/** Existing session_id to resume on startup (for switching sessions). */
 	resumeSessionId?: string;
 	env?: Record<string, string>;
@@ -110,11 +108,10 @@ export class ClaudeBackend extends BaseBackend implements AgentBackend {
 			args.push("--append-system-prompt", this.workspaceGrounding(o.cwd));
 		} else if (o.agentsFile) {
 			// Append: keep Claude Code's default prompt (with its own cwd grounding)
-			// and add the wiki rules on top.
+			// and add the wiki rules on top. Fixed instructions (path:line linking)
+			// are baked into this same file — Claude only honors one append file.
 			args.push("--append-system-prompt-file", o.agentsFile);
 		}
-		// Fixed plugin instructions (e.g. path:line linking) — always on top.
-		if (o.appendPromptFile) args.push("--append-system-prompt-file", o.appendPromptFile);
 		if (resume && this.sessionId) args.push("--resume", this.sessionId);
 
 		// .exe can be spawned directly; a bare command / .cmd shim needs a shell on Windows.
@@ -305,8 +302,26 @@ export class ClaudeBackend extends BaseBackend implements AgentBackend {
 		}
 	}
 
+	/** Sum the token fields Claude reports in a usage object. */
+	private tokensFromUsage(usage: any): number {
+		if (!usage) return 0;
+		return (
+			(usage.input_tokens ?? 0) +
+			(usage.output_tokens ?? 0) +
+			(usage.cache_read_input_tokens ?? 0) +
+			(usage.cache_creation_input_tokens ?? 0)
+		);
+	}
+
 	private handleAssistantMessage(message: any): void {
 		const content = Array.isArray(message?.content) ? message.content : [];
+
+		// Live token count: each assistant message carries usage for the turn so far.
+		const tokens = this.tokensFromUsage(message?.usage);
+		if (tokens) {
+			this.lastStats = { tokensTotal: tokens, cost: this.lastStats?.cost, contextPercent: null };
+			this.emitEvent({ type: "stats", stats: this.lastStats });
+		}
 
 		// Finalize / emit the assistant text.
 		const textBlock = content.find((b: any) => b?.type === "text");
@@ -347,12 +362,7 @@ export class ClaudeBackend extends BaseBackend implements AgentBackend {
 	}
 
 	private handleResult(o: any): void {
-		const usage = o.usage ?? {};
-		const tokensTotal =
-			(usage.input_tokens ?? 0) +
-			(usage.output_tokens ?? 0) +
-			(usage.cache_read_input_tokens ?? 0) +
-			(usage.cache_creation_input_tokens ?? 0);
+		const tokensTotal = this.tokensFromUsage(o.usage);
 		this.lastStats = {
 			tokensTotal: tokensTotal || undefined,
 			cost: typeof o.total_cost_usd === "number" ? o.total_cost_usd : undefined,

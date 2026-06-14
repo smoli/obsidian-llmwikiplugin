@@ -28,6 +28,8 @@ export interface LlmAgentSettings {
 	 * extensions: ask the user, always allow, or always block.
 	 */
 	dialogPolicy: "ask" | "allow" | "block";
+	/** Whether the in-panel session sidebar is collapsed. */
+	sidebarCollapsed: boolean;
 
 	// --- Automation: run a prompt when files land in a watched folder ---
 	/** Enable auto-running a prompt when new files appear in the watch folder. */
@@ -67,6 +69,7 @@ export const DEFAULT_SETTINGS: LlmAgentSettings = {
 	persistSession: true,
 	showThinking: false,
 	dialogPolicy: "ask",
+	sidebarCollapsed: false,
 	claudePath: "claude",
 	claudePermissionMode: "bypassPermissions",
 	claudeModel: "default",
