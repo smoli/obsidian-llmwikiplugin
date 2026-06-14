@@ -33,6 +33,7 @@ class UIDialogModal extends Modal {
 
 		if (req.title) contentEl.createEl("h3", { text: req.title });
 		if (req.message) contentEl.createEl("p", { text: req.message });
+		if (Array.isArray(req.files) && req.files.length) this.renderFiles(req.files);
 
 		switch (req.method) {
 			case "confirm":
@@ -48,6 +49,15 @@ class UIDialogModal extends Modal {
 			default:
 				// Unknown dialog kind — just cancel.
 				this.answer({ cancelled: true });
+		}
+	}
+
+	private renderFiles(files: { status: string; path: string }[]): void {
+		const list = this.contentEl.createDiv({ cls: "llm-dialog-files" });
+		for (const f of files) {
+			const row = list.createDiv({ cls: "llm-dialog-file" });
+			row.createSpan({ cls: "llm-dialog-file-status", text: f.status });
+			row.createSpan({ cls: "llm-dialog-file-path", text: f.path });
 		}
 	}
 

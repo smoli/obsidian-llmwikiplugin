@@ -144,6 +144,7 @@ export class LlmChatView extends ItemView {
 	private mainEl!: HTMLElement;
 	private sidebarEl!: HTMLElement;
 	private sessionListEl!: HTMLElement;
+	private configEl!: HTMLElement;
 	private transcriptEl!: HTMLElement;
 	private inputEl!: HTMLTextAreaElement;
 	private quickBarEl!: HTMLElement;
@@ -152,6 +153,9 @@ export class LlmChatView extends ItemView {
 	private stopBtn!: HTMLButtonElement;
 	private newBtn!: HTMLButtonElement;
 	private statusEl!: HTMLElement;
+	private statusMsgEl!: HTMLElement;
+	private statusModelEl!: HTMLElement;
+	private thinkingField!: HTMLElement;
 	private engineSelect!: HTMLSelectElement;
 	private modelSelect!: HTMLSelectElement;
 	private thinkingSelect!: HTMLSelectElement;
@@ -235,24 +239,15 @@ export class LlmChatView extends ItemView {
 	private buildHeader(): void {
 		const header = this.mainEl.createDiv({ cls: "llm-header" });
 
-		this.engineSelect = header.createEl("select", { cls: "llm-select llm-engine-select" });
-		this.engineSelect.createEl("option", { text: "pi", value: "pi" });
-		this.engineSelect.createEl("option", { text: "Claude Code", value: "claude" });
-		this.engineSelect.value = this.plugin.settings.engine;
-		this.engineSelect.addEventListener("change", () => this.onEngineChange());
+		// Sidebar toggle sits at the far left, right next to the sidebar it controls.
+		const sessionsBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "Toggle sessions sidebar" } });
+		setIcon(sessionsBtn, "panel-left");
+		sessionsBtn.addEventListener("click", () => this.toggleSidebar());
 
-		this.modelSelect = header.createEl("select", { cls: "llm-select llm-model-select" });
-		this.modelSelect.createEl("option", { text: "Loading models…", value: "" });
-		this.modelSelect.addEventListener("change", () => this.onModelChange());
-
-		this.thinkingSelect = header.createEl("select", { cls: "llm-select llm-thinking-select" });
-		for (const lvl of ["off", "minimal", "low", "medium", "high", "xhigh"]) {
-			this.thinkingSelect.createEl("option", { text: `🧠 ${lvl}`, value: lvl });
-		}
-		this.thinkingSelect.value = this.plugin.settings.thinking;
-		this.thinkingSelect.addEventListener("change", async () => {
-			if (this.backend?.running) await this.backend.setThinking(this.thinkingSelect.value as ThinkingLevel);
-		});
+		// Engine / model / thinking live in a collapsible config panel, opened here.
+		const configBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "Engine & model settings" } });
+		setIcon(configBtn, "sliders-horizontal");
+		configBtn.addEventListener("click", () => this.toggleConfig());
 
 		this.personaSelect = header.createEl("select", { cls: "llm-select llm-persona-select" });
 		this.personaSelect.addEventListener("change", () => this.onPersonaChange());
@@ -260,10 +255,6 @@ export class LlmChatView extends ItemView {
 
 		const spacer = header.createDiv({ cls: "llm-header-spacer" });
 		spacer.style.flex = "1";
-
-		const sessionsBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "Toggle sessions sidebar" } });
-		setIcon(sessionsBtn, "panel-left");
-		sessionsBtn.addEventListener("click", () => this.toggleSidebar());
 
 		this.newBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "New session" } });
 		setIcon(this.newBtn, "plus");
@@ -284,7 +275,55 @@ export class LlmChatView extends ItemView {
 			gitBtn.addEventListener("click", (e) => this.openGitMenu(e));
 		}
 
+		this.buildConfigPanel();
 		this.statusEl = this.mainEl.createDiv({ cls: "llm-status" });
+		// A transient message on the left, the persistent engine · model on the right.
+		this.statusMsgEl = this.statusEl.createSpan({ cls: "llm-status-msg" });
+		this.statusModelEl = this.statusEl.createSpan({ cls: "llm-status-model" });
+	}
+
+	/** Collapsible panel holding the engine / model / thinking selectors. */
+	private buildConfigPanel(): void {
+		this.configEl = this.mainEl.createDiv({ cls: "llm-config" });
+		this.configEl.hide();
+
+		const engineField = this.configEl.createDiv({ cls: "llm-config-field" });
+		engineField.createSpan({ cls: "llm-config-label", text: "Engine" });
+		this.engineSelect = engineField.createEl("select", { cls: "llm-select llm-engine-select" });
+		this.engineSelect.createEl("option", { text: "pi", value: "pi" });
+		this.engineSelect.createEl("option", { text: "Claude Code", value: "claude" });
+		this.engineSelect.value = this.plugin.settings.engine;
+		this.engineSelect.addEventListener("change", () => this.onEngineChange());
+
+		const modelField = this.configEl.createDiv({ cls: "llm-config-field" });
+		modelField.createSpan({ cls: "llm-config-label", text: "Model" });
+		this.modelSelect = modelField.createEl("select", { cls: "llm-select llm-model-select" });
+		this.modelSelect.createEl("option", { text: "Loading models…", value: "" });
+		this.modelSelect.addEventListener("change", () => this.onModelChange());
+
+		this.thinkingField = this.configEl.createDiv({ cls: "llm-config-field" });
+		this.thinkingField.createSpan({ cls: "llm-config-label", text: "Thinking" });
+		this.thinkingSelect = this.thinkingField.createEl("select", { cls: "llm-select llm-thinking-select" });
+		for (const lvl of ["off", "minimal", "low", "medium", "high", "xhigh"]) {
+			this.thinkingSelect.createEl("option", { text: `🧠 ${lvl}`, value: lvl });
+		}
+		this.thinkingSelect.value = this.plugin.settings.thinking;
+		this.thinkingSelect.addEventListener("change", async () => {
+			if (this.backend?.running) await this.backend.setThinking(this.thinkingSelect.value as ThinkingLevel);
+		});
+
+		this.updateConfigVisibility();
+	}
+
+	/** Hide controls the active engine doesn't support (e.g. thinking on Claude). */
+	private updateConfigVisibility(): void {
+		if (!this.thinkingField) return;
+		const supportsThinking = this.backend?.capabilities.thinking ?? this.plugin.settings.engine === "pi";
+		this.thinkingField.toggle(supportsThinking);
+	}
+
+	private toggleConfig(): void {
+		this.configEl.toggle(!this.configEl.isShown());
 	}
 
 	private async onEngineChange(): Promise<void> {
@@ -455,6 +494,12 @@ export class LlmChatView extends ItemView {
 			return;
 		}
 
+		// Parse the porcelain status into a changed-file list for the dialog.
+		const files = status.stdout
+			.split("\n")
+			.filter((l) => l.length > 3)
+			.map((l) => ({ status: l.slice(0, 2).trim() || "?", path: l.slice(3) }));
+
 		// Stage everything first so the suggested message covers all changes.
 		this.setStatus("Staging changes…");
 		const add = await runGit(cwd, ["add", "-A"]);
@@ -475,6 +520,8 @@ export class LlmChatView extends ItemView {
 			id: "git-commit",
 			method: "editor",
 			title: "Commit message",
+			message: `${files.length} changed file${files.length === 1 ? "" : "s"}`,
+			files,
 			prefill: suggestion,
 			placeholder: "Describe the change",
 		};
@@ -696,8 +743,7 @@ export class LlmChatView extends ItemView {
 			return;
 		}
 
-		this.thinkingSelect.toggle(backend.capabilities.thinking);
-		this.setStatus(`Connected · ${engine} · cwd: ${cwd}`);
+		this.setStatus(`Connected · cwd: ${cwd}`);
 		await this.loadModels();
 		await this.refreshStats();
 	}
@@ -710,7 +756,7 @@ export class LlmChatView extends ItemView {
 	}
 
 	private addReconnectNotice(): void {
-		const btn = this.statusEl.createEl("button", { text: "Reconnect", cls: "llm-reconnect-btn" });
+		const btn = this.statusMsgEl.createEl("button", { text: "Reconnect", cls: "llm-reconnect-btn" });
 		btn.addEventListener("click", async () => {
 			this.teardownBackend();
 			await this.connect();
@@ -1041,6 +1087,7 @@ export class LlmChatView extends ItemView {
 		this.modelSelect.empty();
 		if (this.models.length === 0) {
 			this.modelSelect.createEl("option", { text: "(no models)", value: "" });
+			this.updateStatusModel();
 			return;
 		}
 		for (const m of this.models) {
@@ -1052,6 +1099,8 @@ export class LlmChatView extends ItemView {
 		} catch {
 			/* ignore */
 		}
+		this.updateStatusModel();
+		this.updateConfigVisibility();
 	}
 
 	private async onModelChange(): Promise<void> {
@@ -1063,6 +1112,7 @@ export class LlmChatView extends ItemView {
 			new Notice(`Could not switch model: ${res.error ?? "unknown error"}`);
 		} else {
 			this.setStatus(`Model: ${this.modelSelect.selectedOptions[0]?.text ?? key}`);
+			this.updateStatusModel();
 		}
 		await this.refreshStats();
 	}
@@ -1779,9 +1829,16 @@ export class LlmChatView extends ItemView {
 	}
 
 	private setStatus(text: string, isError = false): void {
-		this.statusEl.empty();
-		this.statusEl.setText(text);
-		this.statusEl.toggleClass("llm-status-error", isError);
+		this.statusMsgEl.empty();
+		this.statusMsgEl.setText(text);
+		this.statusMsgEl.toggleClass("llm-status-error", isError);
+	}
+
+	/** Show the active engine · model on the right of the status line. */
+	private updateStatusModel(): void {
+		if (!this.statusModelEl) return;
+		const model = this.modelSelect?.selectedOptions[0]?.text || this.modelSelect?.value || "";
+		this.statusModelEl.setText(model ? `${this.plugin.engineLabel()} · ${model}` : this.plugin.engineLabel());
 	}
 
 	private refreshSendState(): void {

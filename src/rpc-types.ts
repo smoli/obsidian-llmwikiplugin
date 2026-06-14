@@ -60,6 +60,8 @@ export interface ExtensionUIRequest {
 	prefill?: string;
 	notifyType?: "info" | "warning" | "error";
 	timeout?: number;
+	/** Optional changed-file list to show (used by the commit dialog). */
+	files?: { status: string; path: string }[];
 	[key: string]: unknown;
 }
 

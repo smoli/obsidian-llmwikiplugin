@@ -131,6 +131,35 @@
 	min-width: 100px;
 }
 
+/* ----- collapsible engine/model config panel ----- */
+
+.llm-config {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: end;
+	gap: 8px 12px;
+	padding: 8px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	background: var(--background-secondary);
+}
+.llm-config-field {
+	display: flex;
+	flex-direction: column;
+	gap: 3px;
+	flex: 0 1 180px;
+	min-width: 0;
+}
+.llm-config-label {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+.llm-config .llm-select {
+	width: 100%;
+	/* Reset any header-era flex (flex-basis becomes height in this column field). */
+	flex: 0 0 auto;
+	height: 28px;
+}
+
 .llm-icon-btn {
 	display: inline-flex;
 	align-items: center;
@@ -159,11 +188,26 @@
 }
 
 .llm-status {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
 	font-size: var(--font-ui-smaller);
 	color: var(--text-muted);
 	padding: 4px 8px;
 	border-bottom: 1px solid var(--background-modifier-border);
+}
+.llm-status-msg {
+	flex: 1 1 auto;
+	min-width: 0;
 	overflow-wrap: anywhere;
+}
+.llm-status-model {
+	flex: 0 0 auto;
+	color: var(--text-faint);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	max-width: 50%;
 }
 .llm-status-error {
 	color: var(--text-error);
@@ -614,6 +658,38 @@ code .llm-page-link {
 }
 
 /* ----- dialog modal ----- */
+
+.llm-dialog-files {
+	max-height: 180px;
+	overflow-y: auto;
+	margin: 6px 0 10px 0;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	background: var(--background-secondary);
+}
+.llm-dialog-file {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	padding: 3px 8px;
+	font-size: var(--font-ui-smaller);
+}
+.llm-dialog-file + .llm-dialog-file {
+	border-top: 1px solid var(--background-modifier-border);
+}
+.llm-dialog-file-status {
+	flex: 0 0 auto;
+	width: 1.6em;
+	font-family: var(--font-monospace);
+	font-weight: var(--font-semibold);
+	color: var(--text-accent);
+}
+.llm-dialog-file-path {
+	flex: 1 1 auto;
+	min-width: 0;
+	overflow-wrap: anywhere;
+	color: var(--text-muted);
+}
 
 .llm-dialog-options {
 	display: flex;
