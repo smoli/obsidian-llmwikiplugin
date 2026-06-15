@@ -371,4 +371,4 @@ Deploy by copying `main.js`, `manifest.json`, and `styles.css` into
 ## Agentic Development note
 
 This plugin was created using agentic development. Some of the commit messages reflect that. Some don't.
-Even for those that don't, an LLM was used to develop this plugin.
+Even for those that don't, an LLM was used to develop the changes in those commits.
