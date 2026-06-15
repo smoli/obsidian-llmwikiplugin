@@ -166,17 +166,17 @@ export default class LlmAgentPlugin extends Plugin {
 
 		this.registerView(VIEW_TYPE, (leaf: WorkspaceLeaf) => new LlmChatView(leaf, this));
 
-		this.addRibbonIcon("bot", "Open LLM Agent", () => this.activateView());
+		this.addRibbonIcon("bot", "Open STS-LLM Wiki", () => this.activateView());
 
 		this.addCommand({
 			id: "open-llm-agent",
-			name: "Open LLM Agent panel",
+			name: "Open panel",
 			callback: () => this.activateView(),
 		});
 
 		this.addCommand({
 			id: "llm-agent-new-session",
-			name: "LLM Agent: new session",
+			name: "New session",
 			callback: async () => {
 				const leaf = await this.activateView();
 				if (leaf?.view instanceof LlmChatView) {
@@ -412,7 +412,7 @@ export default class LlmAgentPlugin extends Plugin {
 		}
 	}
 
-	/** Tell every open LLM Agent panel to rebuild its persona dropdown + prompts. */
+	/** Tell every open STS-LLM Wiki panel to rebuild its persona dropdown + prompts. */
 	refreshOpenViews(): void {
 		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
 			if (leaf.view instanceof LlmChatView) leaf.view.reloadPersonas();

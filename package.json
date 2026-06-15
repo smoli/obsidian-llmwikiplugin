@@ -1,5 +1,5 @@
 {
-	"name": "llm-agent-obsidian",
+	"name": "sts-llm-wiki",
 	"version": "0.2.0",
 	"description": "Obsidian plugin that embeds a coding agent (pi or Claude Code) as a chat panel operating on your vault.",
 	"main": "main.js",

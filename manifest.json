@@ -1,9 +1,9 @@
 {
-	"id": "llm-agent",
-	"name": "LLM Agent",
+	"id": "sts-llm-wiki",
+	"name": "STS-LLM Wiki",
 	"version": "0.2.0",
 	"minAppVersion": "1.4.0",
-	"description": "Chat with a coding agent (pi or Claude Code) inside Obsidian. It reads, creates, and edits your wiki pages using the vault's AGENTS.md, with the engine and model of your choice.",
+	"description": "Chat with a coding agent (pi or Claude Code) in a side panel. It reads, creates, and edits your wiki pages using the vault's AGENTS.md, with the engine and model of your choice.",
 	"author": "Stephan Smola",
 	"isDesktopOnly": true
 }

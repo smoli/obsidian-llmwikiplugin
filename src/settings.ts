@@ -94,7 +94,7 @@ export class LlmAgentSettingTab extends PluginSettingTab {
 		const { containerEl } = this;
 		containerEl.empty();
 
-		containerEl.createEl("h2", { text: "LLM Agent" });
+		containerEl.createEl("h2", { text: "STS-LLM Wiki" });
 		containerEl.createEl("p", {
 			text:
 				"The agent runs as a background process scoped to your vault. It reads the vault's AGENTS.md and can read, create, and edit your wiki pages. Restart the chat panel (or reopen it) after changing these settings.",

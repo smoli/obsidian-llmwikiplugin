@@ -30,6 +30,12 @@ type ResponseEnvelope =
 const MARKER_RE = /^>{2,3}\s*(message|single[_-]?choice|multi[_-]?choice|single|multi)\s*:?\s*$/i;
 const OPTION_RE = /^\s*(?:[-*]|\d+[.)])\s+(.*\S)\s*$/;
 
+/** Best-effort human-readable text from an unknown thrown value. */
+function errorMessage(err: unknown): string {
+	if (err instanceof Error) return err.message;
+	return String(err);
+}
+
 function normalizeMarker(raw: string): ResponseEnvelope["type"] {
 	const m = raw.toLowerCase();
 	if (m.includes("multi")) return "multi_choice";
@@ -199,7 +205,7 @@ export class LlmChatView extends ItemView {
 	}
 
 	getDisplayText(): string {
-		return "LLM Agent";
+		return "STS-LLM Wiki";
 	}
 
 	getIcon(): string {
@@ -242,37 +248,36 @@ export class LlmChatView extends ItemView {
 		// Sidebar toggle sits at the far left, right next to the sidebar it controls.
 		const sessionsBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "Toggle sessions sidebar" } });
 		setIcon(sessionsBtn, "panel-left");
-		sessionsBtn.addEventListener("click", () => this.toggleSidebar());
+		this.registerDomEvent(sessionsBtn, "click", () => this.toggleSidebar());
 
 		// Engine / model / thinking live in a collapsible config panel, opened here.
 		const configBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "Engine & model settings" } });
 		setIcon(configBtn, "sliders-horizontal");
-		configBtn.addEventListener("click", () => this.toggleConfig());
+		this.registerDomEvent(configBtn, "click", () => this.toggleConfig());
 
 		this.personaSelect = header.createEl("select", { cls: "llm-select llm-persona-select" });
-		this.personaSelect.addEventListener("change", () => this.onPersonaChange());
+		this.registerDomEvent(this.personaSelect, "change", () => this.onPersonaChange());
 		this.renderPersonaSelect();
 
-		const spacer = header.createDiv({ cls: "llm-header-spacer" });
-		spacer.style.flex = "1";
+		header.createDiv({ cls: "llm-header-spacer" });
 
 		this.newBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "New session" } });
 		setIcon(this.newBtn, "plus");
-		this.newBtn.addEventListener("click", () => this.startNewSession());
+		this.registerDomEvent(this.newBtn, "click", () => this.startNewSession());
 
 		const saveBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "Save chat as Markdown" } });
 		setIcon(saveBtn, "save");
-		saveBtn.addEventListener("click", () => this.saveChat());
+		this.registerDomEvent(saveBtn, "click", () => this.saveChat());
 
 		this.stopBtn = header.createEl("button", { cls: "llm-icon-btn llm-stop-btn", attr: { "aria-label": "Stop" } });
 		setIcon(this.stopBtn, "square");
 		this.stopBtn.hide();
-		this.stopBtn.addEventListener("click", () => this.backend?.abort());
+		this.registerDomEvent(this.stopBtn, "click", () => this.backend?.abort());
 
 		if (this.plugin.isGitRepo()) {
 			const gitBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "Git" } });
 			setIcon(gitBtn, "git-branch");
-			gitBtn.addEventListener("click", (e) => this.openGitMenu(e));
+			this.registerDomEvent(gitBtn, "click", (e) => this.openGitMenu(e));
 		}
 
 		this.buildConfigPanel();
@@ -293,13 +298,13 @@ export class LlmChatView extends ItemView {
 		this.engineSelect.createEl("option", { text: "pi", value: "pi" });
 		this.engineSelect.createEl("option", { text: "Claude Code", value: "claude" });
 		this.engineSelect.value = this.plugin.settings.engine;
-		this.engineSelect.addEventListener("change", () => this.onEngineChange());
+		this.registerDomEvent(this.engineSelect, "change", () => this.onEngineChange());
 
 		const modelField = this.configEl.createDiv({ cls: "llm-config-field" });
 		modelField.createSpan({ cls: "llm-config-label", text: "Model" });
 		this.modelSelect = modelField.createEl("select", { cls: "llm-select llm-model-select" });
 		this.modelSelect.createEl("option", { text: "Loading models…", value: "" });
-		this.modelSelect.addEventListener("change", () => this.onModelChange());
+		this.registerDomEvent(this.modelSelect, "change", () => this.onModelChange());
 
 		this.thinkingField = this.configEl.createDiv({ cls: "llm-config-field" });
 		this.thinkingField.createSpan({ cls: "llm-config-label", text: "Thinking" });
@@ -308,7 +313,7 @@ export class LlmChatView extends ItemView {
 			this.thinkingSelect.createEl("option", { text: `🧠 ${lvl}`, value: lvl });
 		}
 		this.thinkingSelect.value = this.plugin.settings.thinking;
-		this.thinkingSelect.addEventListener("change", async () => {
+		this.registerDomEvent(this.thinkingSelect, "change", async () => {
 			if (this.backend?.running) await this.backend.setThinking(this.thinkingSelect.value as ThinkingLevel);
 		});
 
@@ -416,8 +421,8 @@ export class LlmChatView extends ItemView {
 				try {
 					await this.app.vault.modify(existing, content);
 					new Notice(`Chat aktualisiert: ${existing.path}`);
-				} catch (err: any) {
-					new Notice(`Speichern fehlgeschlagen: ${err?.message ?? err}`);
+				} catch (err) {
+					new Notice(`Speichern fehlgeschlagen: ${errorMessage(err)}`);
 				}
 				return;
 			}
@@ -436,8 +441,8 @@ export class LlmChatView extends ItemView {
 			const file = await this.app.vault.create(normalizePath(dir + name), content);
 			this.savedChatPath = file.path;
 			new Notice(`Chat gespeichert: ${file.path}`);
-		} catch (err: any) {
-			new Notice(`Speichern fehlgeschlagen: ${err?.message ?? err}`);
+		} catch (err) {
+			new Notice(`Speichern fehlgeschlagen: ${errorMessage(err)}`);
 		}
 	}
 
@@ -618,14 +623,14 @@ export class LlmChatView extends ItemView {
 			cls: "llm-input",
 			attr: { placeholder: "Ask the agent about your wiki… (Enter to send, Shift+Enter for newline)", rows: "3" },
 		});
-		this.inputEl.addEventListener("keydown", (e) => {
+		this.registerDomEvent(this.inputEl, "keydown", (e) => {
 			if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
 				e.preventDefault();
 				this.onSend();
 			}
 		});
 		this.sendBtn = wrap.createEl("button", { cls: "llm-send-btn", text: "Send" });
-		this.sendBtn.addEventListener("click", () => this.onSend());
+		this.registerDomEvent(this.sendBtn, "click", () => this.onSend());
 	}
 
 	/** Rebuild the persona dropdown and quick-prompt bar (personas changed on disk). */
@@ -651,7 +656,7 @@ export class LlmChatView extends ItemView {
 		for (const p of prompts) {
 			const btn = this.quickBarEl.createEl("button", { cls: "llm-quick-btn", text: p.label });
 			if (p.prompt) btn.setAttribute("aria-label", p.prompt);
-			btn.addEventListener("click", () => {
+			this.registerDomEvent(btn, "click", () => {
 				if (!p.prompt.trim()) {
 					new Notice(`Prompt "${p.label}" has no text.`);
 					return;
@@ -738,8 +743,8 @@ export class LlmChatView extends ItemView {
 
 		try {
 			backend.start();
-		} catch (err: any) {
-			this.setStatus(`Failed to start ${engine}: ${err?.message ?? err}`, true);
+		} catch (err) {
+			this.setStatus(`Failed to start ${engine}: ${errorMessage(err)}`, true);
 			return;
 		}
 
@@ -757,7 +762,7 @@ export class LlmChatView extends ItemView {
 
 	private addReconnectNotice(): void {
 		const btn = this.statusMsgEl.createEl("button", { text: "Reconnect", cls: "llm-reconnect-btn" });
-		btn.addEventListener("click", async () => {
+		this.registerDomEvent(btn, "click", async () => {
 			this.teardownBackend();
 			await this.connect();
 		});
@@ -834,12 +839,12 @@ export class LlmChatView extends ItemView {
 		setIcon(icon, ctx.selection ? "text-quote" : "file-text");
 		const pathEl = head.createSpan({ cls: "llm-context-path", text: ctx.pagePath });
 		pathEl.setAttribute("aria-label", `Open ${ctx.pagePath}`);
-		pathEl.addEventListener("click", () => {
+		this.registerDomEvent(pathEl, "click", () => {
 			void this.app.workspace.openLinkText(ctx.pagePath, "", false);
 		});
 		const clear = head.createEl("button", { cls: "llm-context-clear", attr: { "aria-label": "Remove context" } });
 		setIcon(clear, "x");
-		clear.addEventListener("click", () => {
+		this.registerDomEvent(clear, "click", () => {
 			this.pendingContext = null;
 			this.renderPendingContext();
 		});
@@ -909,7 +914,7 @@ export class LlmChatView extends ItemView {
 		head.createSpan({ cls: "llm-sidebar-title", text: "Sessions" });
 		const newBtn = head.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "New session" } });
 		setIcon(newBtn, "plus");
-		newBtn.addEventListener("click", () => void this.startNewSession());
+		this.registerDomEvent(newBtn, "click", () => void this.startNewSession());
 
 		this.sessionListEl = this.sidebarEl.createDiv({ cls: "llm-sidebar-list" });
 	}
@@ -941,8 +946,8 @@ export class LlmChatView extends ItemView {
 		for (const s of list) {
 			const active = s.id === this.session.id;
 			const item = this.sessionListEl.createDiv({ cls: "llm-session-item" + (active ? " is-active" : "") });
-			item.addEventListener("click", () => void this.switchSession(s.id));
-			item.addEventListener("contextmenu", (e) => this.openSessionItemMenu(e, s.id));
+			this.registerDomEvent(item, "click", () => void this.switchSession(s.id));
+			this.registerDomEvent(item, "contextmenu", (e) => this.openSessionItemMenu(e, s.id));
 
 			const body = item.createDiv({ cls: "llm-session-body" });
 			body.createDiv({ cls: "llm-session-name", text: s.name || "New chat" });
@@ -952,13 +957,13 @@ export class LlmChatView extends ItemView {
 			const actions = item.createDiv({ cls: "llm-session-actions" });
 			const rename = actions.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "Rename" } });
 			setIcon(rename, "pencil");
-			rename.addEventListener("click", (e) => {
+			this.registerDomEvent(rename, "click", (e) => {
 				e.stopPropagation();
 				void this.renameSession(s.id);
 			});
 			const del = actions.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "Delete" } });
 			setIcon(del, "trash");
-			del.addEventListener("click", (e) => {
+			this.registerDomEvent(del, "click", (e) => {
 				e.stopPropagation();
 				void this.deleteSession(s.id);
 			});
@@ -1161,9 +1166,9 @@ export class LlmChatView extends ItemView {
 				if (this.streaming) new Notice(res.error ?? "Message rejected.");
 				else this.setStatus(res.error ?? "Prompt rejected.", true);
 			}
-		} catch (err: any) {
+		} catch (err) {
 			this.hideWorking();
-			this.setStatus(`Send failed: ${err?.message ?? err}`, true);
+			this.setStatus(`Send failed: ${errorMessage(err)}`, true);
 		}
 	}
 
@@ -1406,7 +1411,7 @@ export class LlmChatView extends ItemView {
 		return body;
 	}
 
-	private newToolBlock(toolName: string, args: any): ToolBlock {
+	private newToolBlock(toolName: string, args: unknown): ToolBlock {
 		const root = this.appendBlock("llm-tool");
 		const header = root.createDiv({ cls: "llm-tool-header" });
 		const titleEl = header.createDiv({ cls: "llm-tool-title" });
@@ -1421,7 +1426,7 @@ export class LlmChatView extends ItemView {
 		const body = root.createEl("pre", { cls: "llm-tool-body" });
 		body.hide();
 
-		header.addEventListener("click", () => {
+		this.registerDomEvent(header, "click", () => {
 			if (body.isShown()) body.hide();
 			else body.show();
 		});
@@ -1462,14 +1467,15 @@ export class LlmChatView extends ItemView {
 		}
 	}
 
-	private summarizeArgs(toolName: string, args: any): string {
+	private summarizeArgs(toolName: string, args: unknown): string {
 		if (!args || typeof args !== "object") return "";
-		if (typeof args.path === "string") return args.path;
-		if (typeof args.file === "string") return args.file;
-		if (typeof args.file_path === "string") return args.file_path;
-		if (typeof args.command === "string") return this.firstLine(args.command);
-		if (typeof args.pattern === "string") return this.firstLine(args.pattern);
-		const keys = Object.keys(args);
+		const a = args as Record<string, unknown>;
+		if (typeof a.path === "string") return a.path;
+		if (typeof a.file === "string") return a.file;
+		if (typeof a.file_path === "string") return a.file_path;
+		if (typeof a.command === "string") return this.firstLine(a.command);
+		if (typeof a.pattern === "string") return this.firstLine(a.pattern);
+		const keys = Object.keys(a);
 		return keys.length ? `${keys[0]}=…` : "";
 	}
 
@@ -1481,12 +1487,13 @@ export class LlmChatView extends ItemView {
 	}
 
 	/** Full argument text for the hover tooltip. */
-	private fullArgs(args: any): string {
+	private fullArgs(args: unknown): string {
 		if (!args || typeof args !== "object") return "";
-		if (typeof args.command === "string") return args.command;
-		if (typeof args.path === "string") return args.path;
-		if (typeof args.file_path === "string") return args.file_path;
-		if (typeof args.pattern === "string") return args.pattern;
+		const a = args as Record<string, unknown>;
+		if (typeof a.command === "string") return a.command;
+		if (typeof a.path === "string") return a.path;
+		if (typeof a.file_path === "string") return a.file_path;
+		if (typeof a.pattern === "string") return a.pattern;
 		try {
 			return JSON.stringify(args, null, 2);
 		} catch {
@@ -1542,8 +1549,8 @@ export class LlmChatView extends ItemView {
 					li.setAttribute("role", "button");
 					li.setAttribute("tabindex", "0");
 					const choose = () => this.chooseOption(ol, li, opt);
-					li.addEventListener("click", choose);
-					li.addEventListener("keydown", (e) => {
+					this.registerDomEvent(li, "click", choose);
+					this.registerDomEvent(li, "keydown", (e) => {
 						if (e.key === "Enter" || e.key === " ") {
 							e.preventDefault();
 							choose();
@@ -1567,7 +1574,7 @@ export class LlmChatView extends ItemView {
 			label.createSpan({ text: opt });
 		}
 		const send = wrap.createEl("button", { cls: "llm-multi-send", text: "Send" });
-		send.addEventListener("click", () => {
+		this.registerDomEvent(send, "click", () => {
 			if (wrap.classList.contains("llm-options-answered")) return;
 			const chosen = options.filter((_, i) => boxes[i].checked);
 			if (chosen.length === 0) {
@@ -1644,12 +1651,12 @@ export class LlmChatView extends ItemView {
 		a.textContent = label;
 		a.setAttribute("href", dest.path);
 		a.setAttribute("aria-label", line != null ? `${dest.path}:${line}` : dest.path);
-		a.addEventListener("click", (e) => {
+		this.registerDomEvent(a, "click", (e) => {
 			e.preventDefault();
 			const newLeaf: PaneType | boolean = e.ctrlKey || e.metaKey ? "tab" : false;
 			void this.openPage(dest, line, newLeaf);
 		});
-		a.addEventListener("auxclick", (e) => {
+		this.registerDomEvent(a, "auxclick", (e) => {
 			if (e.button === 1) {
 				e.preventDefault();
 				void this.openPage(dest, line, "tab");
@@ -1741,7 +1748,7 @@ export class LlmChatView extends ItemView {
 				new Notice(`pi: ${req.message ?? ""}`);
 				return;
 			case "set_editor_text":
-				this.inputEl.value = String((req as any).text ?? "");
+				this.inputEl.value = String((req as { text?: unknown }).text ?? "");
 				return;
 			case "setStatus":
 			case "setWidget":

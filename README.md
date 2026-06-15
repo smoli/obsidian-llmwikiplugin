@@ -1,4 +1,4 @@
-# LLM Agent for Obsidian
+# STS-LLM Wiki
 
 Chat with the [pi coding agent](https://www.npmjs.com/package/@earendil-works/pi-coding-agent)
 in a side panel inside Obsidian. The agent runs scoped to your vault, reads the vault's
@@ -55,7 +55,7 @@ You only need the engine(s) you intend to use.
 ## Usage
 
 1. Open the panel via the ribbon **bot** icon or the command
-   *"Open LLM Agent panel"*.
+   *"STS-LLM Wiki: Open panel"*.
 2. Pick your model and thinking level in the panel header.
 3. Ask away. The agent can answer questions about the wiki and make edits, e.g.
    *"Ingest the new PDF in raw/ and update the wiki per AGENTS.md."*
@@ -299,7 +299,7 @@ rather than a single selection or page.
 The plugin can watch a folder and automatically run a prompt whenever a new file
 lands in it — e.g. drop a PDF into your raw folder and have the agent ingest it.
 
-Enable it under **Settings → LLM Agent → Automation**:
+Enable it under **Settings → STS-LLM Wiki → Automation**:
 
 - **Run on new file in folder** — master toggle (off by default).
 - **Watch folder** — vault-relative folder to watch (default `99-raw`).
@@ -342,7 +342,7 @@ npm run build    # type-check + production bundle
 ```
 
 Deploy into a vault (builds, then copies `main.js`, `manifest.json`, `styles.css`
-into `<vault>/.obsidian/plugins/llm-agent/`):
+into `<vault>/.obsidian/plugins/sts-llm-wiki/`):
 
 ```
 npm run deploy -- "C:\path\to\your\vault"
@@ -356,7 +356,7 @@ node scripts/rpc-smoke.mjs "C:\path\to\your\vault"
 ```
 
 Deploy by copying `main.js`, `manifest.json`, and `styles.css` into
-`<vault>/.obsidian/plugins/llm-agent/`, then enable the plugin.
+`<vault>/.obsidian/plugins/sts-llm-wiki/`, then enable the plugin.
 
 ## Notes & troubleshooting
 

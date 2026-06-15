@@ -1,4 +1,4 @@
-/* ===== LLM Agent panel ===== */
+/* ===== STS-LLM Wiki panel ===== */
 
 .llm-agent-view {
 	display: flex;
@@ -114,6 +114,10 @@
 	padding: 8px;
 	border-bottom: 1px solid var(--background-modifier-border);
 	flex-wrap: wrap;
+}
+
+.llm-header-spacer {
+	flex: 1;
 }
 
 .llm-select {
