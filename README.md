@@ -367,3 +367,8 @@ Deploy by copying `main.js`, `manifest.json`, and `styles.css` into
   dialogs* setting to gate them.
 - The plugin operates on real files in your vault. Since the target vault is a
   git repo and `AGENTS.md` asks pi to commit, your history is your safety net.
+
+## Agentic Development note
+
+This plugin was created using agentic development. Some of the commit messages reflect that. Some don't.
+Even for those that don't, an LLM was used to develop this plugin.
