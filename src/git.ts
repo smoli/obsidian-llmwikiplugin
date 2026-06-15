@@ -1,4 +1,5 @@
 import { spawn } from "child_process";
+import { resolveCommand, spawnEnv } from "./exec-env";
 
 export interface GitResult {
 	code: number;
@@ -17,10 +18,10 @@ export function runGit(cwd: string, args: string[], timeoutMs = 60_000): Promise
 		let stderr = "";
 		let done = false;
 
-		const proc = spawn("git", args, {
+		const proc = spawn(resolveCommand("git"), args, {
 			cwd,
 			windowsHide: true,
-			env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+			env: spawnEnv({ GIT_TERMINAL_PROMPT: "0" }),
 		});
 
 		const finish = (r: GitResult) => {
@@ -59,7 +60,8 @@ export function runCapture(
 		let done = false;
 
 		const useShell = process.platform === "win32" && !/\.exe$/i.test(cmd);
-		const proc = spawn(cmd, args, { cwd, shell: useShell, windowsHide: true, env: process.env });
+		const command = useShell ? cmd : resolveCommand(cmd);
+		const proc = spawn(command, args, { cwd, shell: useShell, windowsHide: true, env: spawnEnv() });
 
 		const finish = (r: GitResult) => {
 			if (done) return;

@@ -8,6 +8,7 @@ import {
 	PromptResult,
 } from "./backend";
 import { attachJsonlReader } from "./jsonl";
+import { resolveCommand, spawnEnv } from "./exec-env";
 import { ThinkingLevel } from "./rpc-types";
 
 export interface ClaudeBackendOptions {
@@ -117,11 +118,14 @@ export class ClaudeBackend extends BaseBackend implements AgentBackend {
 		// .exe can be spawned directly; a bare command / .cmd shim needs a shell on Windows.
 		const useShell = process.platform === "win32" && !/\.exe$/i.test(o.claudePath);
 
-		const proc = spawn(o.claudePath, args, {
+		// GUI-launched Obsidian has a minimal PATH on macOS/Linux, so resolve the
+		// binary and hand the child an enriched PATH (else: spawn claude ENOENT).
+		const command = useShell ? o.claudePath : resolveCommand(o.claudePath);
+		const proc = spawn(command, args, {
 			cwd: o.cwd,
 			shell: useShell,
 			windowsHide: true,
-			env: { ...process.env, ...(o.env ?? {}) },
+			env: spawnEnv(o.env),
 		});
 		this.proc = proc;
 

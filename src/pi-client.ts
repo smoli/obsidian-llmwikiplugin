@@ -1,6 +1,7 @@
 import { ChildProcessWithoutNullStreams, spawn } from "child_process";
 import { StringDecoder } from "string_decoder";
 import { EventEmitter } from "events";
+import { resolveCommand, spawnEnv } from "./exec-env";
 import {
 	ExtensionUIRequest,
 	PiModel,
@@ -83,11 +84,14 @@ export class PiClient extends EventEmitter {
 		// launch. Elsewhere we spawn directly.
 		const useShell = process.platform === "win32";
 
-		const proc = spawn(this.opts.piPath, args, {
+		// GUI-launched Obsidian has a minimal PATH on macOS/Linux, so resolve the
+		// binary and hand the child an enriched PATH (else: spawn pi ENOENT).
+		const command = useShell ? this.opts.piPath : resolveCommand(this.opts.piPath);
+		const proc = spawn(command, args, {
 			cwd: this.opts.cwd,
 			shell: useShell,
 			windowsHide: true,
-			env: { ...process.env, ...(this.opts.env ?? {}) },
+			env: spawnEnv(this.opts.env),
 		});
 		this.proc = proc;
 
