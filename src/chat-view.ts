@@ -13,107 +13,18 @@ import {
 import { runCapture, runGit } from "./git";
 import type LlmAgentPlugin from "./main";
 import { AgentBackend, BackendEvent, BackendModel, NormalizedStats, PermissionRequest } from "./backend";
-import { PiBackend } from "./pi-backend";
-import { ClaudeBackend } from "./claude-backend";
+import { SessionRuntime } from "./session-runtime";
+import { ResponseEnvelope, parseResponseEnvelopes } from "./response-format";
 import { ExtensionUIRequest, ThinkingLevel } from "./rpc-types";
 import { SavedSession, newSessionId } from "./sessions";
 import { showUIDialog } from "./ui-dialog";
 
 export const VIEW_TYPE = "llm-agent-chat";
 
-/** Structured response shapes a schema persona may emit (see RESPONSE_SCHEMA_INSTRUCTION). */
-type ResponseEnvelope =
-	| { type: "message"; text: string }
-	| { type: "single_choice"; text: string; options: string[] }
-	| { type: "multi_choice"; text: string; options: string[] };
-
-const MARKER_RE = /^>{2,3}\s*(message|single[_-]?choice|multi[_-]?choice|single|multi)\s*:?\s*$/i;
-const OPTION_RE = /^\s*(?:[-*]|\d+[.)])\s+(.*\S)\s*$/;
-
 /** Best-effort human-readable text from an unknown thrown value. */
 function errorMessage(err: unknown): string {
 	if (err instanceof Error) return err.message;
 	return String(err);
-}
-
-function normalizeMarker(raw: string): ResponseEnvelope["type"] {
-	const m = raw.toLowerCase();
-	if (m.includes("multi")) return "multi_choice";
-	if (m.includes("single")) return "single_choice";
-	return "message";
-}
-
-/**
- * Parse a structured response into a sequence of envelopes using the marker
- * protocol (a `>>> <type>` line per block; `- option` lines for choices). This
- * is deliberately tolerant: text is taken verbatim (no JSON escaping, so rich
- * prose with quotes never breaks it), and a reply with no markers degrades to a
- * single plain message. Returns an empty array only for empty input.
- */
-function parseResponseEnvelopes(raw: string): ResponseEnvelope[] {
-	let s = raw.trim();
-	if (!s) return [];
-	// Unwrap a single code fence wrapping the whole reply, if present.
-	const fence = s.match(/^```[a-z]*\s*([\s\S]*?)\s*```$/i);
-	if (fence) s = fence[1].trim();
-
-	const envs: ResponseEnvelope[] = [];
-	let type: ResponseEnvelope["type"] = "message";
-	let textLines: string[] = [];
-	let options: string[] = [];
-	let sawMarker = false;
-
-	const flush = () => {
-		const text = textLines.join("\n").trim();
-		if (type === "message") {
-			if (text) envs.push({ type: "message", text });
-		} else if (options.length) {
-			envs.push({ type, text, options });
-		} else if (text) {
-			envs.push({ type: "message", text });
-		}
-		textLines = [];
-		options = [];
-	};
-
-	for (const line of s.split(/\r?\n/)) {
-		const m = line.match(MARKER_RE);
-		if (m) {
-			flush();
-			type = normalizeMarker(m[1]);
-			sawMarker = true;
-			continue;
-		}
-		if (type !== "message") {
-			const opt = line.match(OPTION_RE);
-			if (opt) {
-				options.push(opt[1].trim());
-				continue;
-			}
-		}
-		textLines.push(line);
-	}
-	flush();
-
-	// No markers at all → render the whole reply as one markdown message.
-	if (!sawMarker) return s ? [{ type: "message", text: s }] : [];
-	return envs;
-}
-
-/**
- * Markdown rendering of envelopes for the transcript (saved chats + session
- * restore). Choices become a numbered list — readable in saved chats; on restore
- * they render as a static list (the live chips come from renderStructuredInto).
- */
-function envelopesToTranscript(envs: ResponseEnvelope[]): string {
-	return envs
-		.map((env) => {
-			if (env.type === "message") return env.text.trim();
-			const list = env.options.map((o, i) => `${i + 1}. ${o}`).join("\n");
-			return `${env.text.trim()}\n\n${list}`;
-		})
-		.filter(Boolean)
-		.join("\n\n");
 }
 
 interface ToolBlock {
@@ -143,7 +54,14 @@ function formatTokens(n: number): string {
 }
 
 export class LlmChatView extends ItemView {
-	private backend: AgentBackend | null = null;
+	// The view renders the active session's runtime; the runtime owns the backend.
+	private runtime: SessionRuntime | null = null;
+	private get backend(): AgentBackend | null {
+		return this.runtime?.backend ?? null;
+	}
+	private get structuredResponse(): boolean {
+		return this.runtime?.structuredResponse ?? false;
+	}
 	private models: BackendModel[] = [];
 
 	// DOM
@@ -184,9 +102,6 @@ export class LlmChatView extends ItemView {
 	// When tool-call blocks are hidden, the busy indicator names the active tool.
 	// It persists until the next tool starts or the model emits text.
 	private currentToolLabel = "";
-	// True when the active persona requests a structured response envelope; the
-	// assistant message is then buffered and parsed instead of streamed as text.
-	private structuredResponse = false;
 
 	// Page (and optional selection) attached via the "ask about" context menu,
 	// prepended to the next message.
@@ -220,7 +135,16 @@ export class LlmChatView extends ItemView {
 	async onOpen(): Promise<void> {
 		this.contentEl.empty();
 		this.contentEl.addClass("llm-agent-view");
-		this.session = this.makeSession();
+
+		// Restore the last active session (resumes its conversation) if it still
+		// exists; otherwise start fresh. Persona/engine follow the restored session.
+		const lastId = this.plugin.sessionStore.getActiveId();
+		const restored = lastId ? this.plugin.sessionStore.get(lastId) : undefined;
+		this.session = restored ?? this.makeSession();
+		if (restored) {
+			this.plugin.settings.engine = restored.engine;
+			this.plugin.settings.selectedPersona = restored.persona;
+		}
 
 		// Two columns: a session sidebar and the chat itself.
 		this.sidebarEl = this.contentEl.createDiv({ cls: "llm-sidebar" });
@@ -235,6 +159,7 @@ export class LlmChatView extends ItemView {
 		this.contextEl = this.mainEl.createDiv({ cls: "llm-context" });
 		this.contextEl.hide();
 		this.buildInput();
+		if (restored) this.renderTranscriptFromSession();
 		this.renderSessionList();
 		await this.connect();
 	}
@@ -651,7 +576,7 @@ export class LlmChatView extends ItemView {
 	private renderQuickPrompts(): void {
 		if (!this.quickBarEl) return;
 		this.quickBarEl.empty();
-		const persona = this.plugin.getSelectedPersona();
+		const persona = this.plugin.getPersonaByPath(this.session.persona);
 		const prompts = persona ? persona.prompts : this.plugin.getDefaultPrompts();
 		if (prompts.length === 0) {
 			this.quickBarEl.hide();
@@ -681,87 +606,44 @@ export class LlmChatView extends ItemView {
 			return;
 		}
 
-		const s = this.plugin.settings;
-		const engine = s.engine;
-		this.engineSelect.value = engine;
+		// The view's chrome reflects the active session's config.
+		this.engineSelect.value = this.session.engine;
 		this.renderPersonaSelect();
 		this.renderQuickPrompts();
 
-		// A selected persona replaces AGENTS.md as the system prompt for this session.
-		// The persona / AGENTS.md prompt file already has the fixed instructions
-		// (path:line linking, schema protocol) baked in — Claude only honors a
-		// single append file, so we never pass a second one.
-		const personaFile = this.plugin.resolvePersonaPromptFile();
-		this.structuredResponse = this.plugin.getSelectedPersona()?.responseSchema === true;
-		this.session.engine = engine;
-		this.session.persona = s.selectedPersona;
-		const resumeSessionId = this.session.engineSessionId;
-
-		if (engine === "claude") {
-			this.backend = new ClaudeBackend({
-				claudePath: s.claudePath,
-				cwd,
-				model: s.claudeModel || "default",
-				permissionMode: s.claudePermissionMode,
-				agentsFile:
-					personaFile ??
-					this.plugin.resolveAgentsPromptFile() ??
-					this.plugin.resolveFixedInstructionFile() ??
-					undefined,
-				agentsMode: s.claudeAgentsMode,
-				resumeSessionId,
-			});
-		} else {
-			// Disable pi's raw AGENTS.md auto-load and re-inject the frontmatter-stripped
-			// version (plus the persona, if any) so pi never sees the prompts frontmatter.
-			this.backend = new PiBackend({
-				piPath: s.piPath,
-				cwd,
-				provider: s.provider || undefined,
-				model: s.model || undefined,
-				thinking: s.thinking,
-				persistSession: s.persistSession,
-				disableContextFiles: true,
-				appendSystemPromptFiles: [this.plugin.resolveAgentsPromptFile(), personaFile].filter(
-					(f): f is string => !!f
-				),
-				resumeSessionId,
-			});
-		}
-
-		const backend = this.backend;
-		backend.on("event", (ev: BackendEvent) => this.handleBackendEvent(ev));
-		backend.on("dialog", (req: ExtensionUIRequest) => this.handleDialog(req));
-		backend.on("permission", (req: PermissionRequest) => this.handlePermission(req));
-		backend.on("error", (err: Error) => this.setStatus(`${backend.engineName} error: ${err.message}`, true));
-		backend.on("exit", (code: number | null) => {
-			this.streaming = false;
-			this.hideWorking();
-			this.refreshSendState();
-			const tail = this.backend?.lastStderr;
-			this.setStatus(
-				`${backend.engineName} process exited${code != null ? ` (code ${code})` : ""}.${tail ? " " + tail.split("\n").pop() : ""}`,
-				true
-			);
-			this.addReconnectNotice();
+		// The runtime owns the backend, built from the session's engine + persona.
+		this.runtime = this.plugin.sessionManager.acquire(this.session);
+		const err = this.runtime.start({
+			onEvent: (ev) => this.handleBackendEvent(ev),
+			onDialog: (req) => this.handleDialog(req),
+			onPermission: (req) => this.handlePermission(req),
+			onError: (name, e) => this.setStatus(`${name} error: ${e.message}`, true),
+			onExit: (name, code, tail) => {
+				this.streaming = false;
+				this.hideWorking();
+				this.refreshSendState();
+				this.setStatus(
+					`${name} process exited${code != null ? ` (code ${code})` : ""}.${tail ? " " + tail.split("\n").pop() : ""}`,
+					true
+				);
+				this.addReconnectNotice();
+			},
 		});
-
-		try {
-			backend.start();
-		} catch (err) {
-			this.setStatus(`Failed to start ${engine}: ${errorMessage(err)}`, true);
+		if (err) {
+			this.setStatus(err, true);
 			return;
 		}
 
-		this.setStatus(`Connected · cwd: ${cwd}`);
+		const resumed = this.session.engineSessionId;
+		this.setStatus(`Connected · ${resumed ? `resumed ${resumed.slice(0, 8)}` : "new session"} · cwd: ${cwd}`);
 		await this.loadModels();
 		await this.refreshStats();
 	}
 
 	private teardownBackend(): void {
-		if (this.backend) {
-			this.backend.dispose();
-			this.backend = null;
+		if (this.runtime) {
+			this.plugin.sessionManager.release(this.runtime.session.id);
+			this.runtime = null;
 		}
 	}
 
@@ -789,9 +671,28 @@ export class LlmChatView extends ItemView {
 		}
 	}
 
-	async runPrompt(text: string): Promise<void> {
+	/**
+	 * Run a folder-watch automation: wait for any in-flight response to finish,
+	 * then open a *fresh* session with the configured persona and submit the
+	 * prompt. The user's previous session is kept in the sidebar.
+	 */
+	async runAutomation(text: string, persona: string): Promise<void> {
+		await this.waitUntilIdle();
+		if (this.plugin.settings.selectedPersona !== persona) {
+			this.plugin.settings.selectedPersona = persona;
+			await this.plugin.saveSettings();
+		}
+		await this.startFreshSession(); // makeSession + connect pick up the persona
 		await this.ensureRunning();
 		await this.submitMessage(text);
+	}
+
+	/** Resolve once no response is streaming (capped so a stuck run can't block forever). */
+	private async waitUntilIdle(maxMs = 900_000): Promise<void> {
+		const start = Date.now();
+		while (this.streaming && Date.now() - start < maxMs) {
+			await new Promise((r) => window.setTimeout(r, 250));
+		}
 	}
 
 	/**
@@ -928,6 +829,7 @@ export class LlmChatView extends ItemView {
 		await this.plugin.saveSettings();
 		this.engineSelect.value = target.engine;
 
+		this.plugin.sessionStore.setActive(target.id);
 		this.clearConversationDom();
 		this.renderTranscriptFromSession();
 		this.teardownBackend();
@@ -1100,6 +1002,7 @@ export class LlmChatView extends ItemView {
 		this.session.model = this.modelSelect.selectedOptions[0]?.text || this.session.model;
 		this.session.updatedAt = Date.now();
 		this.plugin.sessionStore.upsert(this.session);
+		this.plugin.sessionStore.setActive(this.session.id);
 		this.renderSessionList();
 	}
 

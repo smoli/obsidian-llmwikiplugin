@@ -2,6 +2,7 @@ import { Editor, FileSystemAdapter, MarkdownFileInfo, MarkdownView, Menu, Notice
 import { VIEW_TYPE, LlmChatView } from "./chat-view";
 import { DEFAULT_SETTINGS, LlmAgentSettingTab, LlmAgentSettings } from "./settings";
 import { SessionStore } from "./sessions";
+import { SessionManager } from "./session-runtime";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
@@ -143,6 +144,7 @@ are unsure, reference the page path without a line.`;
 export default class LlmAgentPlugin extends Plugin {
 	declare settings: LlmAgentSettings;
 	sessionStore!: SessionStore;
+	sessionManager!: SessionManager;
 
 	// Auto-run batching: paths created in the watch folder, plus a debounce timer.
 	private pendingAutoRun = new Set<string>();
@@ -156,6 +158,7 @@ export default class LlmAgentPlugin extends Plugin {
 		const pluginDir = this.manifest.dir ?? `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
 		this.sessionStore = new SessionStore(this.app, pluginDir);
 		await this.sessionStore.load();
+		this.sessionManager = new SessionManager(this);
 
 		// Personas (and their one-click prompts) live in vault-root markdown
 		// frontmatter; rebuild open panels' persona dropdown + quick-prompt bar
@@ -251,6 +254,7 @@ export default class LlmAgentPlugin extends Plugin {
 			window.clearTimeout(this.selectionTimer);
 			this.selectionTimer = null;
 		}
+		this.sessionManager?.disposeAll();
 		// Views are detached by Obsidian; LlmChatView.onClose disposes its backend.
 	}
 
@@ -315,7 +319,7 @@ export default class LlmAgentPlugin extends Plugin {
 
 		const leaf = await this.activateView();
 		if (leaf?.view instanceof LlmChatView) {
-			await leaf.view.runPrompt(prompt);
+			await leaf.view.runAutomation(prompt, this.settings.autoRunPersona);
 		}
 	}
 
@@ -400,11 +404,15 @@ export default class LlmAgentPlugin extends Plugin {
 		return out;
 	}
 
-	/** The Persona object for the currently selected persona, or null. */
+	/** The Persona object for a vault-relative persona path, or null. */
+	getPersonaByPath(personaPath: string): Persona | null {
+		if (!personaPath) return null;
+		return this.getPersonas().find((p) => p.path === personaPath) ?? null;
+	}
+
+	/** The Persona object for the globally selected persona, or null. */
 	getSelectedPersona(): Persona | null {
-		const sel = this.settings.selectedPersona;
-		if (!sel) return null;
-		return this.getPersonas().find((p) => p.path === sel) ?? null;
+		return this.getPersonaByPath(this.settings.selectedPersona);
 	}
 
 	/**
@@ -422,27 +430,25 @@ export default class LlmAgentPlugin extends Plugin {
 	}
 
 	/**
-	 * Resolve the currently selected persona to a temp file holding its content
+	 * Resolve a persona (by vault-relative path) to a temp file holding its content
 	 * with frontmatter stripped, suitable to pass as a system prompt. Returns null
-	 * when no (valid) persona is selected — callers then fall back to AGENTS.md.
-	 * When the persona opts into a response schema, the structured-output protocol
-	 * is appended to its prompt.
+	 * when the path is empty/invalid — callers then fall back to AGENTS.md. When the
+	 * persona opts into a response schema, the structured-output protocol is appended.
 	 */
-	resolvePersonaPromptFile(): string | null {
-		const sel = this.settings.selectedPersona;
-		if (!sel) return null;
+	resolvePersonaPromptFile(personaPath: string): string | null {
+		if (!personaPath) return null;
 		const base = this.getVaultBase();
 		if (!base) return null;
-		const abs = path.join(base, sel);
+		const abs = path.join(base, personaPath);
 		try {
 			if (!fs.existsSync(abs)) return null;
 			let content = stripFrontmatter(fs.readFileSync(abs, "utf8"));
 			if (!content) return null;
-			if (this.getSelectedPersona()?.responseSchema) content += RESPONSE_SCHEMA_INSTRUCTION;
+			if (this.getPersonaByPath(personaPath)?.responseSchema) content += RESPONSE_SCHEMA_INSTRUCTION;
 			// A persona is always the single prompt file Claude/pi use, so bake the
 			// fixed instructions in here rather than passing a second append file.
 			content += "\n\n" + WIKI_LINE_LINK_INSTRUCTION;
-			const slug = sel.replace(/[^a-zA-Z0-9]+/g, "-");
+			const slug = personaPath.replace(/[^a-zA-Z0-9]+/g, "-");
 			const tmp = path.join(os.tmpdir(), `llm-agent-persona-${slug}.md`);
 			fs.writeFileSync(tmp, content + "\n", "utf8");
 			return tmp;
@@ -487,7 +493,7 @@ export default class LlmAgentPlugin extends Plugin {
 	 * isn't fed to the model. Returns null if there's no AGENTS.md (or no body
 	 * once frontmatter is removed). pi can't use this — it reads AGENTS.md itself.
 	 */
-	resolveAgentsPromptFile(): string | null {
+	resolveAgentsPromptFile(personaActive: boolean): string | null {
 		const src = this.getAgentsFile();
 		if (!src) return null;
 		try {
@@ -496,7 +502,7 @@ export default class LlmAgentPlugin extends Plugin {
 			// Bake in the fixed instructions only when no persona is active — with a
 			// persona, the persona file already carries them (avoids duplicate text
 			// for pi, which appends both AGENTS.md and the persona).
-			if (!this.settings.selectedPersona) content += "\n\n" + WIKI_LINE_LINK_INSTRUCTION;
+			if (!personaActive) content += "\n\n" + WIKI_LINE_LINK_INSTRUCTION;
 			const tmp = path.join(os.tmpdir(), "llm-agent-agents.md");
 			fs.writeFileSync(tmp, content + "\n", "utf8");
 			return tmp;

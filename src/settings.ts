@@ -43,6 +43,8 @@ export interface LlmAgentSettings {
 	autoRunFolder: string;
 	/** Prompt to run; supports {{files}} (newline list) and {{count}} placeholders. */
 	autoRunPrompt: string;
+	/** Persona (vault-relative path, "" = AGENTS.md) for the automation's session. */
+	autoRunPersona: string;
 
 	// --- Claude Code engine ---
 	/** Command or absolute path used to launch the Claude Code CLI. */
@@ -88,6 +90,7 @@ export const DEFAULT_SETTINGS: LlmAgentSettings = {
 	autoRunFolder: "99-raw",
 	autoRunPrompt:
 		"New source file(s) were added to the raw folder:\n{{files}}\n\nIngest them following the workflow in AGENTS.md.",
+	autoRunPersona: "",
 };
 
 const THINKING_LEVELS: ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh"];
@@ -370,6 +373,22 @@ export class LlmAgentSettingTab extends PluginSettingTab {
 						await this.plugin.saveSettings();
 					})
 			);
+
+		new Setting(containerEl)
+			.setName("Persona")
+			.setDesc("Persona used for the automation's session. The run always opens a fresh session with this persona.")
+			.addDropdown((d) => {
+				d.addOption("", "Default (AGENTS.md)");
+				for (const p of this.plugin.getPersonas()) d.addOption(p.path, p.name);
+				// Fall back to default if the saved persona no longer exists.
+				const saved = this.plugin.settings.autoRunPersona;
+				const exists = !saved || this.plugin.getPersonas().some((p) => p.path === saved);
+				d.setValue(exists ? saved : "");
+				d.onChange(async (v) => {
+					this.plugin.settings.autoRunPersona = v;
+					await this.plugin.saveSettings();
+				});
+			});
 
 		new Setting(containerEl)
 			.setName("Prompt")

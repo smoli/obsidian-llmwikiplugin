@@ -25,6 +25,8 @@ export interface SavedSession {
  */
 export class SessionStore {
 	private sessions: SavedSession[] = [];
+	/** Id of the session that was active last, restored when the panel reopens. */
+	private lastActiveId = "";
 	private saveTimer: number | null = null;
 
 	constructor(private app: App, private dir: string) {}
@@ -39,10 +41,22 @@ export class SessionStore {
 				const raw = await this.app.vault.adapter.read(this.filePath);
 				const data = JSON.parse(raw);
 				if (Array.isArray(data?.sessions)) this.sessions = data.sessions;
+				if (typeof data?.lastActiveId === "string") this.lastActiveId = data.lastActiveId;
 			}
 		} catch (err) {
 			console.error("[llm-agent] failed to read sessions.json:", err);
 		}
+	}
+
+	getActiveId(): string {
+		return this.lastActiveId;
+	}
+
+	/** Remember which session is active so it can be restored on the next open. */
+	setActive(id: string): void {
+		if (id === this.lastActiveId) return;
+		this.lastActiveId = id;
+		this.scheduleSave();
 	}
 
 	/** All sessions, most recently updated first. */
@@ -88,7 +102,10 @@ export class SessionStore {
 			this.saveTimer = null;
 		}
 		try {
-			await this.app.vault.adapter.write(this.filePath, JSON.stringify({ sessions: this.sessions }, null, 2));
+			await this.app.vault.adapter.write(
+				this.filePath,
+				JSON.stringify({ sessions: this.sessions, lastActiveId: this.lastActiveId }, null, 2)
+			);
 		} catch (err) {
 			console.error("[llm-agent] failed to write sessions.json:", err);
 		}

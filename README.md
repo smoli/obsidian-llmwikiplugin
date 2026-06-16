@@ -303,12 +303,17 @@ Enable it under **Settings → STS-LLM Wiki → Automation**:
 
 - **Run on new file in folder** — master toggle (off by default).
 - **Watch folder** — vault-relative folder to watch (default `99-raw`).
+- **Persona** — which persona the automation runs under (default = AGENTS.md).
 - **Prompt** — what to send. `{{files}}` expands to the list of new files and
   `{{count}}` to how many.
 
-When files are added, the panel opens (if needed), connects, and runs the prompt.
-Multiple files dropped together are debounced into a single run. Files already in
-the vault at startup do **not** trigger it — only genuinely new ones.
+When files are added, the panel opens (if needed) and the automation always runs
+in a **fresh session** with the configured persona — your current chat is left
+untouched in the sidebar. If a response is still streaming when files land, the
+automation **waits until that response finishes** before starting its session, so
+it never interrupts an in-flight answer. Multiple files dropped together are
+debounced into a single run. Files already in the vault at startup do **not**
+trigger it — only genuinely new ones.
 
 ## Settings
 
@@ -322,7 +327,7 @@ the vault at startup do **not** trigger it — only genuinely new ones.
 | Persist sessions | Save conversations to pi's session store so they can be resumed. |
 | Show thinking | Display the agent's reasoning blocks. |
 | Tool permission dialogs | Ask / always allow / always block confirmation prompts pi raises (and Claude's permission asks). |
-| Run on new file / Watch folder / Prompt | Auto-run a prompt when files appear in a watched folder (see Automation above). |
+| Run on new file / Watch folder / Persona / Prompt | Auto-run a prompt (in a fresh session under the chosen persona) when files appear in a watched folder (see Automation above). |
 | Claude command | Command/path to the Claude Code CLI (default `claude`). |
 | Claude model | `default` / Opus / Sonnet / Haiku. |
 | Permissions (Claude) | **Bypass all** (edits + bash/git, no prompts — needed for the full wiki workflow), **Auto-accept edits only** (edits auto-approved, bash restricted), or **Ask me per tool** (prompts in the panel). |
