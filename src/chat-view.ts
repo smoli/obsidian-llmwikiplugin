@@ -1360,17 +1360,23 @@ export class LlmChatView extends ItemView {
 	private renderUserBlock(text: string): void {
 		const block = this.appendBlock("llm-msg llm-msg-user");
 		const body = block.createDiv({ cls: "llm-msg-body" });
-		this.renderMarkdownInto(body, text);
-		this.scrollToBottom(true);
+		void this.renderMarkdownInto(body, text).then(() => this.pinBottom());
+		this.pinBottom();
 	}
 
 	private renderAssistantBlock(m: SessionMessage): void {
 		const block = this.appendBlock("llm-msg llm-msg-assistant");
 		const body = block.createDiv({ cls: "llm-msg-body" });
 		// Restore structured chips/checkboxes when the message carries envelopes.
-		if (m.envelopes && m.envelopes.length) this.renderStructuredInto(body, m.envelopes);
-		else this.renderMarkdownInto(body, m.text);
-		this.scrollToBottom();
+		if (m.envelopes && m.envelopes.length) {
+			this.renderStructuredInto(body, m.envelopes); // pins after its async render
+		} else {
+			const stick = this.nearBottom();
+			void this.renderMarkdownInto(body, m.text).then(() => {
+				if (stick) this.pinBottom();
+			});
+			if (stick) this.pinBottom();
+		}
 	}
 
 	private newAssistantTextBlock(): HTMLElement {
@@ -1495,9 +1501,11 @@ export class LlmChatView extends ItemView {
 		});
 	}
 
-	private renderMarkdownInto(el: HTMLElement, markdown: string): void {
+	/** Renders markdown into `el`. The returned promise resolves once it's in the
+	 *  DOM (callers re-pin the scroll then, since the height grows asynchronously). */
+	private renderMarkdownInto(el: HTMLElement, markdown: string): Promise<void> {
 		el.empty();
-		void MarkdownRenderer.render(this.app, markdown, el, "", this).then(() => {
+		return MarkdownRenderer.render(this.app, markdown, el, "", this).then(() => {
 			this.linkifyPaths(el);
 		});
 	}
@@ -1513,11 +1521,13 @@ export class LlmChatView extends ItemView {
 
 	/** Render a sequence of response envelopes: text, single-choice, multi-choice. */
 	private renderStructuredInto(body: HTMLElement, envs: ResponseEnvelope[]): void {
+		const stick = this.nearBottom();
 		body.empty();
+		const renders: Promise<void>[] = [];
 		for (const env of envs) {
 			if (env.text) {
 				const textEl = body.createDiv({ cls: "llm-structured-text" });
-				this.renderMarkdownInto(textEl, env.text);
+				renders.push(this.renderMarkdownInto(textEl, env.text));
 			}
 			if (env.type === "single_choice") {
 				const ol = body.createEl("ol", { cls: "llm-options" });
@@ -1538,7 +1548,13 @@ export class LlmChatView extends ItemView {
 				this.renderMultiChoice(body, env.options);
 			}
 		}
-		this.scrollToBottom();
+		// Chips are in the DOM now, but the question text renders asynchronously and
+		// grows the height — re-pin to the bottom once that settles so nothing (the
+		// chips/checkboxes especially) stays hidden below the fold.
+		if (stick) {
+			this.pinBottom();
+			void Promise.all(renders).then(() => this.pinBottom());
+		}
 	}
 
 	/** Checkbox list plus a Send button; submits the chosen option texts together. */
@@ -1683,12 +1699,18 @@ export class LlmChatView extends ItemView {
 	private finalizeText(): void {
 		if (this.currentTextEl) {
 			const envs = this.structuredResponse ? parseResponseEnvelopes(this.currentText) : [];
-			if (envs.length) this.renderStructuredInto(this.currentTextEl, envs);
-			else this.renderMarkdownInto(this.currentTextEl, this.currentText);
+			if (envs.length) {
+				this.renderStructuredInto(this.currentTextEl, envs); // pins after its async render
+			} else {
+				const stick = this.nearBottom();
+				void this.renderMarkdownInto(this.currentTextEl, this.currentText).then(() => {
+					if (stick) this.pinBottom();
+				});
+				if (stick) this.pinBottom();
+			}
 		}
 		this.currentTextEl = null;
 		this.currentText = "";
-		this.scrollToBottom();
 	}
 
 	private finalizeThinking(): void {
@@ -1839,8 +1861,16 @@ export class LlmChatView extends ItemView {
 	}
 
 	private scrollToBottom(force = false): void {
+		if (force || this.nearBottom()) this.pinBottom();
+	}
+
+	/** Whether the transcript is scrolled close to the bottom (user is "following"). */
+	private nearBottom(): boolean {
 		const el = this.transcriptEl;
-		const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 120;
-		if (force || nearBottom) el.scrollTop = el.scrollHeight;
+		return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+	}
+
+	private pinBottom(): void {
+		this.transcriptEl.scrollTop = this.transcriptEl.scrollHeight;
 	}
 }
