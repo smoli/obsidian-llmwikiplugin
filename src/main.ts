@@ -1,4 +1,4 @@
-import { Editor, FileSystemAdapter, MarkdownFileInfo, Menu, Notice, Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
+import { Editor, FileSystemAdapter, MarkdownFileInfo, MarkdownView, Menu, Notice, Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import { VIEW_TYPE, LlmChatView } from "./chat-view";
 import { DEFAULT_SETTINGS, LlmAgentSettingTab, LlmAgentSettings } from "./settings";
 import { SessionStore } from "./sessions";
@@ -147,6 +147,8 @@ export default class LlmAgentPlugin extends Plugin {
 	// Auto-run batching: paths created in the watch folder, plus a debounce timer.
 	private pendingAutoRun = new Set<string>();
 	private autoRunTimer: number | null = null;
+	// Debounce for auto-attaching the editor selection to chat panels.
+	private selectionTimer: number | null = null;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -228,6 +230,10 @@ export default class LlmAgentPlugin extends Plugin {
 
 		this.addSettingTab(new LlmAgentSettingTab(this.app, this));
 
+		// Optional: mirror the editor selection into open chat panels as a context
+		// chip, debounced so a drag-select doesn't fire on every change.
+		this.registerDomEvent(document, "selectionchange", () => this.onSelectionChange());
+
 		// Register the folder watcher only after layout is ready. Obsidian replays
 		// a "create" event for every existing file during startup; waiting for
 		// layout-ready skips that initial flood so we only react to genuinely new files.
@@ -241,7 +247,40 @@ export default class LlmAgentPlugin extends Plugin {
 			window.clearTimeout(this.autoRunTimer);
 			this.autoRunTimer = null;
 		}
+		if (this.selectionTimer != null) {
+			window.clearTimeout(this.selectionTimer);
+			this.selectionTimer = null;
+		}
 		// Views are detached by Obsidian; LlmChatView.onClose disposes its backend.
+	}
+
+	// ------------------------------------------------ auto-attach editor selection
+
+	private onSelectionChange(): void {
+		if (!this.settings.autoAttachSelection) return;
+		if (this.selectionTimer != null) window.clearTimeout(this.selectionTimer);
+		this.selectionTimer = window.setTimeout(() => {
+			this.selectionTimer = null;
+			this.attachActiveSelection();
+		}, 350);
+	}
+
+	/**
+	 * Mirror the active note's selection into open chat panels. A non-empty
+	 * selection sets the chip; clearing the selection *while the note is still the
+	 * active view* removes an auto-attached chip. If the active view isn't a note
+	 * (e.g. the user moved to the chat to type), nothing changes — the chip stays.
+	 */
+	private attachActiveSelection(): void {
+		const view = this.app.workspace.getActiveViewOfType(MarkdownView);
+		if (!view || !view.file) return;
+		const sel = view.editor?.getSelection?.() ?? "";
+		const pagePath = this.toAgentPath(view.file.path);
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+			if (!(leaf.view instanceof LlmChatView)) continue;
+			if (sel.trim()) leaf.view.setSelectionContext(pagePath, sel);
+			else leaf.view.clearSelectionContext();
+		}
 	}
 
 	// ----------------------------------------------------- folder-watch auto-run

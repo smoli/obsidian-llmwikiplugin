@@ -191,6 +191,8 @@ export class LlmChatView extends ItemView {
 	// Page (and optional selection) attached via the "ask about" context menu,
 	// prepended to the next message.
 	private pendingContext: { pagePath: string; selection?: string } | null = null;
+	// True when the chip came from auto-attach (so it may be auto-removed on deselect).
+	private pendingContextAuto = false;
 
 	// The active session; its transcript is the live conversation record (user +
 	// assistant text only, used for saving and for restoring on session switch).
@@ -818,6 +820,7 @@ export class LlmChatView extends ItemView {
 
 		const sel = selection ? selection.replace(/\r\n/g, "\n").trim() : undefined;
 		this.pendingContext = { pagePath, selection: sel || undefined };
+		this.pendingContextAuto = false; // explicit attach — don't auto-remove
 		this.renderPendingContext();
 		this.inputEl.value = "";
 		this.inputEl.focus();
@@ -826,6 +829,28 @@ export class LlmChatView extends ItemView {
 				? `Context from ${pagePath} attached — type your question.`
 				: `Page ${pagePath} attached — type your question.`
 		);
+	}
+
+	/**
+	 * Attach an editor selection as the pending context chip without touching the
+	 * session (used by the auto-attach-on-selection setting). No-op if it already
+	 * matches the current chip.
+	 */
+	setSelectionContext(pagePath: string, selection: string): void {
+		const sel = selection.replace(/\r\n/g, "\n").trim();
+		if (!sel) return;
+		if (this.pendingContext?.pagePath === pagePath && this.pendingContext.selection === sel) return;
+		this.pendingContext = { pagePath, selection: sel };
+		this.pendingContextAuto = true;
+		this.renderPendingContext();
+	}
+
+	/** Remove the chip if it was auto-attached (the selection was cleared in-note). */
+	clearSelectionContext(): void {
+		if (!this.pendingContextAuto || !this.pendingContext) return;
+		this.pendingContext = null;
+		this.pendingContextAuto = false;
+		this.renderPendingContext();
 	}
 
 	private renderPendingContext(): void {
@@ -849,6 +874,7 @@ export class LlmChatView extends ItemView {
 		setIcon(clear, "x");
 		this.registerDomEvent(clear, "click", () => {
 			this.pendingContext = null;
+			this.pendingContextAuto = false;
 			this.renderPendingContext();
 		});
 
@@ -1156,6 +1182,7 @@ export class LlmChatView extends ItemView {
 				message = `Regarding the page \`${ctx.pagePath}\`:\n\n${text}`;
 			}
 			this.pendingContext = null;
+			this.pendingContextAuto = false;
 			this.renderPendingContext();
 		}
 

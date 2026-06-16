@@ -26,6 +26,8 @@ export interface LlmAgentSettings {
 	/** Show tool-call blocks in the chat. When off, the busy indicator names the
 	 *  current tool instead (e.g. "calling bash"). */
 	showToolCalls: boolean;
+	/** Auto-attach the current editor selection to open chat panels as a context chip. */
+	autoAttachSelection: boolean;
 	/**
 	 * How to handle tool-permission / confirmation dialogs raised by pi
 	 * extensions: ask the user, always allow, or always block.
@@ -72,6 +74,7 @@ export const DEFAULT_SETTINGS: LlmAgentSettings = {
 	persistSession: true,
 	showThinking: false,
 	showToolCalls: true,
+	autoAttachSelection: false,
 	dialogPolicy: "ask",
 	sidebarCollapsed: false,
 	claudePath: "claude",
@@ -138,6 +141,18 @@ export class LlmAgentSettingTab extends PluginSettingTab {
 			.addToggle((t) =>
 				t.setValue(this.plugin.settings.showToolCalls).onChange(async (v) => {
 					this.plugin.settings.showToolCalls = v;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Auto-attach selection")
+			.setDesc(
+				"Experimental: when you select text in a note, attach it to the open chat panel automatically (as a context chip), without using the right-click menu."
+			)
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.autoAttachSelection).onChange(async (v) => {
+					this.plugin.settings.autoAttachSelection = v;
 					await this.plugin.saveSettings();
 				})
 			);
