@@ -167,7 +167,8 @@ export class LlmChatView extends ItemView {
 	async onClose(): Promise<void> {
 		void this.plugin.sessionStore.flush();
 		this.stopWorkingTimer();
-		this.teardownBackend();
+		// Keep a streaming session warm so reopening the panel re-attaches to it.
+		this.leaveCurrentRuntime();
 	}
 
 	// ---------------------------------------------------------------- layout
@@ -599,7 +600,7 @@ export class LlmChatView extends ItemView {
 	// ------------------------------------------------------------- lifecycle
 
 	private async connect(): Promise<void> {
-		if (this.backend) return;
+		if (this.runtime?.running) return;
 		const cwd = this.plugin.getWorkingDir();
 		if (!cwd) {
 			this.setStatus("Cannot resolve vault path — a local vault is required.", true);
@@ -611,9 +612,18 @@ export class LlmChatView extends ItemView {
 		this.renderPersonaSelect();
 		this.renderQuickPrompts();
 
-		// The runtime owns the backend, built from the session's engine + persona.
-		this.runtime = this.plugin.sessionManager.acquire(this.session);
-		const err = this.runtime.start({
+		// Acquire the session's runtime (warm if it kept streaming in the background)
+		// and start it if it's cold. The runtime owns the backend + transcript.
+		const runtime = this.plugin.sessionManager.acquire(this.session);
+		this.runtime = runtime;
+		if (!runtime.backend) {
+			const err = runtime.start();
+			if (err) {
+				this.setStatus(err, true);
+				return;
+			}
+		}
+		runtime.attach({
 			onEvent: (ev) => this.handleBackendEvent(ev),
 			onDialog: (req) => this.handleDialog(req),
 			onPermission: (req) => this.handlePermission(req),
@@ -629,10 +639,8 @@ export class LlmChatView extends ItemView {
 				this.addReconnectNotice();
 			},
 		});
-		if (err) {
-			this.setStatus(err, true);
-			return;
-		}
+		runtime.markSeen();
+		this.adoptRuntimeState();
 
 		const resumed = this.session.engineSessionId;
 		this.setStatus(`Connected · ${resumed ? `resumed ${resumed.slice(0, 8)}` : "new session"} · cwd: ${cwd}`);
@@ -640,17 +648,47 @@ export class LlmChatView extends ItemView {
 		await this.refreshStats();
 	}
 
-	private teardownBackend(): void {
-		if (this.runtime) {
-			this.plugin.sessionManager.release(this.runtime.session.id);
-			this.runtime = null;
+	/** Reflect the (possibly mid-stream, warm) runtime's state in the view. */
+	private adoptRuntimeState(): void {
+		const r = this.runtime;
+		this.streaming = r?.streaming ?? false;
+		if (r && this.streaming) {
+			// Seed the in-progress assistant block with what streamed while detached.
+			this.resetStreamState();
+			this.runStartMs = Date.now();
+			this.runTokens = 0;
+			this.currentText = r.currentBuf;
+			this.currentTextEl = this.newAssistantTextBlock();
+			if (!this.structuredResponse && this.currentText) {
+				this.renderMarkdownInto(this.currentTextEl, this.currentText);
+			}
+			this.showWorking();
+			this.startWorkingTimer();
 		}
+		this.refreshSendState();
+	}
+
+	/**
+	 * Stop rendering the current session's runtime. If it's still streaming it is
+	 * kept **warm** (keeps running headlessly in the background); an idle runtime
+	 * is disposed (it can be resumed on demand when revisited).
+	 */
+	private leaveCurrentRuntime(): void {
+		const r = this.runtime;
+		if (!r) return;
+		this.runtime = null;
+		this.stopWorkingTimer();
+		if (r.streaming) r.detach();
+		else this.plugin.sessionManager.release(r.session.id);
 	}
 
 	private addReconnectNotice(): void {
 		const btn = this.statusMsgEl.createEl("button", { text: "Reconnect", cls: "llm-reconnect-btn" });
 		this.registerDomEvent(btn, "click", async () => {
-			this.teardownBackend();
+			if (this.runtime) {
+				this.plugin.sessionManager.release(this.runtime.session.id);
+				this.runtime = null;
+			}
 			await this.connect();
 		});
 	}
@@ -785,7 +823,8 @@ export class LlmChatView extends ItemView {
 	}
 
 	private async startNewSession(): Promise<void> {
-		if (this.isBusy("starting a new session")) return;
+		// Safe during streaming now: the current session keeps running in the
+		// background (kept warm) while a fresh one opens.
 		await this.startFreshSession();
 	}
 
@@ -809,9 +848,9 @@ export class LlmChatView extends ItemView {
 	/** Start a brand-new session. The previous one is already persisted (if it had
 	 * messages), so nothing is lost. */
 	private async startFreshSession(): Promise<void> {
+		this.leaveCurrentRuntime();
 		this.session = this.makeSession();
 		this.clearConversationDom();
-		this.teardownBackend();
 		await this.connect();
 		this.renderSessionList();
 		this.setStatus("New session.");
@@ -820,8 +859,9 @@ export class LlmChatView extends ItemView {
 	private async switchSession(id: string): Promise<void> {
 		const target = this.plugin.sessionStore.get(id);
 		if (!target || target.id === this.session.id) return;
-		if (this.isBusy("switching sessions")) return;
 
+		// Leaving keeps a still-streaming session warm in the background.
+		this.leaveCurrentRuntime();
 		this.session = target;
 		// Align engine + persona so the engine can resume the right conversation.
 		this.plugin.settings.engine = target.engine;
@@ -832,7 +872,6 @@ export class LlmChatView extends ItemView {
 		this.plugin.sessionStore.setActive(target.id);
 		this.clearConversationDom();
 		this.renderTranscriptFromSession();
-		this.teardownBackend();
 		await this.connect();
 		this.renderSessionList();
 		this.setStatus(`Session: ${target.name || "Untitled"}`);
@@ -860,14 +899,23 @@ export class LlmChatView extends ItemView {
 		this.sidebarEl.toggleClass("is-collapsed", this.plugin.settings.sidebarCollapsed);
 	}
 
+	/** Public hook for the plugin to refresh sidebars when any runtime changes. */
+	reloadSessionList(): void {
+		this.renderSessionList();
+	}
+
 	/** Rebuild the session list. The active session is always shown (even before
-	 *  it is persisted), highlighted, newest first. */
+	 *  it is persisted), highlighted, newest first. Background runtimes get a
+	 *  status dot (streaming / unseen reply). */
 	private renderSessionList(): void {
 		if (!this.sessionListEl) return;
 		this.sessionListEl.empty();
 
 		const saved = this.plugin.sessionStore.getAll();
 		const list = saved.some((s) => s.id === this.session.id) ? saved.slice() : [this.session, ...saved];
+		// Stable order by creation time (newest first) so a new reply — which bumps
+		// updatedAt — doesn't reshuffle the list while you work.
+		list.sort((a, b) => b.createdAt - a.createdAt);
 
 		if (list.length === 0) {
 			this.sessionListEl.createDiv({ cls: "llm-session-empty", text: "No sessions yet." });
@@ -879,6 +927,12 @@ export class LlmChatView extends ItemView {
 			const item = this.sessionListEl.createDiv({ cls: "llm-session-item" + (active ? " is-active" : "") });
 			this.registerDomEvent(item, "click", () => void this.switchSession(s.id));
 			this.registerDomEvent(item, "contextmenu", (e) => this.openSessionItemMenu(e, s.id));
+
+			// Status dot for background runtimes: streaming or has an unseen reply.
+			const rt = this.plugin.sessionManager.get(s.id);
+			const dot = item.createSpan({ cls: "llm-session-dot" });
+			if (!active && rt?.streaming) dot.addClass("is-streaming");
+			else if (!active && rt?.hasUnseenReply) dot.addClass("is-unseen");
 
 			const body = item.createDiv({ cls: "llm-session-body" });
 			body.createDiv({ cls: "llm-session-name", text: s.name || "New chat" });
@@ -942,9 +996,12 @@ export class LlmChatView extends ItemView {
 	}
 
 	private async deleteSession(id: string): Promise<void> {
-		if (this.isBusy("deleting the session")) return;
+		const isActive = id === this.session.id;
+		if (isActive && this.isBusy("deleting the session")) return;
+		this.plugin.sessionManager.release(id); // dispose its backend if running
 		this.plugin.sessionStore.remove(id);
-		if (id === this.session.id) {
+		if (isActive) {
+			this.runtime = null; // just released
 			await this.startFreshSession();
 		} else {
 			this.renderSessionList();
@@ -968,9 +1025,14 @@ export class LlmChatView extends ItemView {
 			message: `This permanently removes ${others} other session${others === 1 ? "" : "s"}, keeping only the current one. This cannot be undone.`,
 		});
 		if (answer.confirmed !== true) return;
+		// Dispose the runtimes of the sessions about to be removed.
+		for (const s of this.plugin.sessionStore.getAll()) {
+			if (s.id !== keepId) this.plugin.sessionManager.release(s.id);
+		}
 		const removed = this.plugin.sessionStore.keepOnly(keepId);
 		// Keeping a non-active session deletes the active one — switch to the kept one.
 		if (keepId !== this.session.id) {
+			this.runtime = null; // the active runtime was just released
 			await this.switchSession(keepId);
 		}
 		this.renderSessionList();
@@ -989,28 +1051,6 @@ export class LlmChatView extends ItemView {
 		for (const m of this.session.transcript) {
 			if (m.role === "user") this.renderUserBlock(m.text);
 			else this.renderAssistantBlock(m.text);
-		}
-	}
-
-	/** Persist the current session after its transcript changed; name it lazily. */
-	private afterTranscriptChange(): void {
-		if (this.session.transcript.length === 0) return;
-		if (!this.session.name) {
-			const first = this.session.transcript.find((t) => t.role === "user")?.text ?? "New chat";
-			this.session.name = first.split("\n").map((l) => l.trim()).filter(Boolean)[0]?.slice(0, 60) || "New chat";
-		}
-		this.session.model = this.modelSelect.selectedOptions[0]?.text || this.session.model;
-		this.session.updatedAt = Date.now();
-		this.plugin.sessionStore.upsert(this.session);
-		this.plugin.sessionStore.setActive(this.session.id);
-		this.renderSessionList();
-	}
-
-	private async captureSessionId(): Promise<void> {
-		const sid = await this.backend?.getEngineSessionId();
-		if (sid && sid !== this.session.engineSessionId) {
-			this.session.engineSessionId = sid;
-			if (this.session.transcript.length) this.plugin.sessionStore.upsert(this.session);
 		}
 	}
 
@@ -1036,6 +1076,7 @@ export class LlmChatView extends ItemView {
 		} catch {
 			/* ignore */
 		}
+		this.session.model = this.modelSelect.selectedOptions[0]?.text || this.session.model;
 		this.updateStatusModel();
 		this.updateConfigVisibility();
 	}
@@ -1048,6 +1089,7 @@ export class LlmChatView extends ItemView {
 		if (!res.ok) {
 			new Notice(`Could not switch model: ${res.error ?? "unknown error"}`);
 		} else {
+			this.session.model = this.modelSelect.selectedOptions[0]?.text || this.session.model;
 			this.setStatus(`Model: ${this.modelSelect.selectedOptions[0]?.text ?? key}`);
 			this.updateStatusModel();
 		}
@@ -1066,7 +1108,8 @@ export class LlmChatView extends ItemView {
 	/** Send a message to the agent (used by the input box and quick-prompt buttons). */
 	private async submitMessage(text: string): Promise<void> {
 		if (!text.trim()) return;
-		if (!this.backend?.running) {
+		const runtime = this.runtime;
+		if (!runtime?.running) {
 			new Notice("The agent is not running. Try Reconnect.");
 			return;
 		}
@@ -1089,11 +1132,12 @@ export class LlmChatView extends ItemView {
 			this.renderPendingContext();
 		}
 
-		this.appendUserMessage(message);
+		// The runtime records the user turn in the transcript; the view renders it.
+		this.renderUserBlock(message);
 		this.showWorking();
 
 		try {
-			const res = await this.backend.prompt(message, this.streaming);
+			const res = await runtime.prompt(message, this.streaming);
 			if (!res.ok) {
 				this.hideWorking();
 				if (this.streaming) new Notice(res.error ?? "Message rejected.");
@@ -1165,7 +1209,6 @@ export class LlmChatView extends ItemView {
 				this.finalizeThinking();
 				this.refreshSendState();
 				void this.refreshStats();
-				void this.captureSessionId();
 				break;
 
 			case "error":
@@ -1334,12 +1377,6 @@ export class LlmChatView extends ItemView {
 		} finally {
 			this.statsPolling = false;
 		}
-	}
-
-	private appendUserMessage(text: string): void {
-		this.session.transcript.push({ role: "user", text });
-		this.renderUserBlock(text);
-		this.afterTranscriptChange();
 	}
 
 	private renderUserBlock(text: string): void {
@@ -1662,22 +1699,12 @@ export class LlmChatView extends ItemView {
 
 	// ---------------------------------------------------------- finalization
 
+	/** Render-only: the runtime owns pushing the finished message into the transcript. */
 	private finalizeText(): void {
 		if (this.currentTextEl) {
 			const envs = this.structuredResponse ? parseResponseEnvelopes(this.currentText) : [];
-			if (envs.length) {
-				this.renderStructuredInto(this.currentTextEl, envs);
-				this.session.transcript.push({ role: "assistant", text: envelopesToTranscript(envs) });
-				this.afterTranscriptChange();
-			} else {
-				// Plain message, or a structured persona whose output didn't parse —
-				// fall back to rendering the raw text as markdown.
-				this.renderMarkdownInto(this.currentTextEl, this.currentText);
-				if (this.currentText.trim()) {
-					this.session.transcript.push({ role: "assistant", text: this.currentText });
-					this.afterTranscriptChange();
-				}
-			}
+			if (envs.length) this.renderStructuredInto(this.currentTextEl, envs);
+			else this.renderMarkdownInto(this.currentTextEl, this.currentText);
 		}
 		this.currentTextEl = null;
 		this.currentText = "";
@@ -1817,8 +1844,9 @@ export class LlmChatView extends ItemView {
 			this.stopBtn.hide();
 			this.sendBtn.setText("Send");
 		}
-		// Can't start/replace a session mid-run — it would abort the response.
-		this.newBtn.disabled = this.streaming;
+		// A new session no longer aborts the running one (it stays warm in the
+		// background), so the + button stays enabled while streaming.
+		this.newBtn.disabled = false;
 	}
 
 	/** True (with a notice) if a run is in flight, used to block session changes. */

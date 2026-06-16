@@ -464,6 +464,13 @@ export default class LlmAgentPlugin extends Plugin {
 		}
 	}
 
+	/** Tell every open panel to rebuild its session sidebar (status badges, names). */
+	refreshSessionLists(): void {
+		for (const leaf of this.app.workspace.getLeavesOfType(VIEW_TYPE)) {
+			if (leaf.view instanceof LlmChatView) leaf.view.reloadSessionList();
+		}
+	}
+
 	/** Whether the working directory is (inside) a git repository. */
 	isGitRepo(): boolean {
 		const cwd = this.getWorkingDir();

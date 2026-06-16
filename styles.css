@@ -73,6 +73,24 @@
 	background: var(--background-modifier-active-hover, var(--background-modifier-hover));
 	box-shadow: inset 2px 0 0 var(--interactive-accent);
 }
+.llm-session-dot {
+	flex: 0 0 auto;
+	width: 7px;
+	height: 7px;
+	border-radius: 50%;
+	background: transparent;
+}
+.llm-session-dot.is-streaming {
+	background: var(--interactive-accent);
+	animation: llm-pulse 1.2s infinite ease-in-out;
+}
+.llm-session-dot.is-unseen {
+	background: var(--text-accent);
+}
+@keyframes llm-pulse {
+	0%, 100% { opacity: 0.35; }
+	50% { opacity: 1; }
+}
 .llm-session-body {
 	flex: 1;
 	min-width: 0;
