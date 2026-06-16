@@ -181,3 +181,11 @@ Two ways to authenticate (settings → OpenAI → Authentication):
   replay, 401→refresh). Settings: auth-mode dropdown + "Sign in with ChatGPT"
   button; plugin `loginOpenAi`/`logoutOpenAi`/`refreshOpenAiToken`. Build green,
   deployed. **Untested against a live ChatGPT login.**
+- **Secret storage upgraded (keychain)** — `src/secrets.ts` now encrypts the
+  out-of-vault `~/.sts-llm-wiki/credentials.json` with Electron `safeStorage` (OS
+  keychain: Windows DPAPI / macOS Keychain / Linux libsecret) when reachable, with
+  a plaintext fallback so login never breaks. Feature-detects across
+  `electron.safeStorage` / `electron.remote` / `@electron/remote` (latter external
+  in esbuild); logs which path engaged. Addresses Phase 6's "better secret storage
+  than plaintext data.json" ahead of schedule. The earlier git-leak fix (secrets
+  out of the tracked vault `data.json`) stays in place.
