@@ -23,6 +23,9 @@ export interface LlmAgentSettings {
 	persistSession: boolean;
 	/** Show the agent's thinking blocks in the chat. */
 	showThinking: boolean;
+	/** Show tool-call blocks in the chat. When off, the busy indicator names the
+	 *  current tool instead (e.g. "calling bash"). */
+	showToolCalls: boolean;
 	/**
 	 * How to handle tool-permission / confirmation dialogs raised by pi
 	 * extensions: ask the user, always allow, or always block.
@@ -68,6 +71,7 @@ export const DEFAULT_SETTINGS: LlmAgentSettings = {
 	thinking: "medium",
 	persistSession: true,
 	showThinking: false,
+	showToolCalls: true,
 	dialogPolicy: "ask",
 	sidebarCollapsed: false,
 	claudePath: "claude",
@@ -112,6 +116,31 @@ export class LlmAgentSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				});
 			});
+
+		// ----- general chat-panel display (both engines) -----
+		containerEl.createEl("h3", { text: "Chat panel" });
+
+		new Setting(containerEl)
+			.setName("Show thinking")
+			.setDesc("Display the agent's reasoning blocks in the chat panel.")
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.showThinking).onChange(async (v) => {
+					this.plugin.settings.showThinking = v;
+					await this.plugin.saveSettings();
+				})
+			);
+
+		new Setting(containerEl)
+			.setName("Show tool calls")
+			.setDesc(
+				"Display each tool call (bash, read, edit, …) as a block in the chat. When off, the chat stays clean and the working indicator names the current tool instead (e.g. \"calling bash\")."
+			)
+			.addToggle((t) =>
+				t.setValue(this.plugin.settings.showToolCalls).onChange(async (v) => {
+					this.plugin.settings.showToolCalls = v;
+					await this.plugin.saveSettings();
+				})
+			);
 
 		containerEl.createEl("h3", { text: "pi" });
 
@@ -184,16 +213,6 @@ export class LlmAgentSettingTab extends PluginSettingTab {
 			.addToggle((t) =>
 				t.setValue(this.plugin.settings.persistSession).onChange(async (v) => {
 					this.plugin.settings.persistSession = v;
-					await this.plugin.saveSettings();
-				})
-			);
-
-		new Setting(containerEl)
-			.setName("Show thinking")
-			.setDesc("Display the agent's reasoning blocks in the chat panel.")
-			.addToggle((t) =>
-				t.setValue(this.plugin.settings.showThinking).onChange(async (v) => {
-					this.plugin.settings.showThinking = v;
 					await this.plugin.saveSettings();
 				})
 			);

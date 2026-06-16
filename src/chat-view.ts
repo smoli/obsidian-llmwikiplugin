@@ -181,6 +181,9 @@ export class LlmChatView extends ItemView {
 	private runTokens = 0;
 	private workingTimer: number | null = null;
 	private statsPolling = false;
+	// When tool-call blocks are hidden, the busy indicator names the active tool.
+	// It persists until the next tool starts or the model emits text.
+	private currentToolLabel = "";
 	// True when the active persona requests a structured response envelope; the
 	// assistant message is then buffered and parsed instead of streamed as text.
 	private structuredResponse = false;
@@ -1188,6 +1191,11 @@ export class LlmChatView extends ItemView {
 
 			case "text-start":
 				this.finalizeThinking();
+				// The model is producing its answer now — drop any "calling …" label.
+				if (this.currentToolLabel) {
+					this.currentToolLabel = "";
+					this.updateWorkingMeta();
+				}
 				this.currentText = "";
 				this.currentTextEl = this.newAssistantTextBlock();
 				break;
@@ -1280,6 +1288,13 @@ export class LlmChatView extends ItemView {
 	// ---------------------------------------------------------- tool rendering
 
 	private onToolStart(ev: Extract<BackendEvent, { type: "tool-start" }>): void {
+		if (!this.plugin.settings.showToolCalls) {
+			// Hidden mode: surface the active tool in the busy indicator instead. It
+			// stays until the next tool starts or the model emits text (see text-start).
+			this.currentToolLabel = this.toolActionLabel(ev.name, ev.args);
+			this.updateWorkingMeta();
+			return;
+		}
 		const block = this.newToolBlock(ev.name, ev.args);
 		this.toolBlocks.set(ev.id, block);
 	}
@@ -1291,12 +1306,26 @@ export class LlmChatView extends ItemView {
 	}
 
 	private onToolEnd(ev: Extract<BackendEvent, { type: "tool-end" }>): void {
+		// In hidden mode there is no block; the label is left in place until the next
+		// tool or text replaces it, so don't clear it here.
 		const block = this.toolBlocks.get(ev.id);
 		if (!block) return;
 		this.setToolBody(block, ev.text || (ev.isError ? "(error)" : "(done)"), ev.isError);
 		block.root.toggleClass("llm-tool-error", ev.isError);
 		const badge = block.titleEl.querySelector(".llm-tool-status");
 		if (badge) badge.setText(ev.isError ? "error" : "done");
+	}
+
+	/** Short phrase for the busy indicator, e.g. "calling git" / "calling read". */
+	private toolActionLabel(name: string, args: unknown): string {
+		const n = (name || "").toLowerCase();
+		if (n === "bash") {
+			const a = args && typeof args === "object" ? (args as Record<string, unknown>) : null;
+			const cmd = a && typeof a.command === "string" ? a.command.trim() : "";
+			const first = cmd.split(/\s+/)[0]?.replace(/[^a-zA-Z0-9_.\-]/g, "");
+			return first ? `calling ${first}` : "calling bash";
+		}
+		return n ? `calling ${n}` : "working";
 	}
 
 	// --------------------------------------------------------- DOM builders
@@ -1355,8 +1384,9 @@ export class LlmChatView extends ItemView {
 			meta.textContent = "";
 			return;
 		}
-		const parts = [formatDuration(Math.floor((Date.now() - this.runStartMs) / 1000))];
+		const parts: string[] = [formatDuration(Math.floor((Date.now() - this.runStartMs) / 1000))];
 		if (this.runTokens > 0) parts.push(`${formatTokens(this.runTokens)} tokens`);
+		if (this.currentToolLabel) parts.push(this.currentToolLabel);
 		meta.textContent = parts.join(" · ");
 	}
 
@@ -1736,6 +1766,7 @@ export class LlmChatView extends ItemView {
 		this.currentThinkingEl = null;
 		this.currentThinking = "";
 		this.toolBlocks.clear();
+		this.currentToolLabel = "";
 		this.hideWorking();
 	}
 
