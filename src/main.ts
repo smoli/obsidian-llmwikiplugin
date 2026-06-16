@@ -3,6 +3,7 @@ import { VIEW_TYPE, LlmChatView } from "./chat-view";
 import { DEFAULT_SETTINGS, LlmAgentSettingTab, LlmAgentSettings } from "./settings";
 import { SessionStore, SavedSession, newSessionId } from "./sessions";
 import { SessionManager } from "./session-runtime";
+import { loginOpenAiCodex, refreshOpenAiCodex } from "./openai-oauth";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
@@ -382,9 +383,63 @@ export default class LlmAgentPlugin extends Plugin {
 		return leaf;
 	}
 
+	/** Run the ChatGPT (Codex) OAuth login and store the credentials. */
+	async loginOpenAi(): Promise<boolean> {
+		try {
+			const creds = await loginOpenAiCodex((url) => {
+				try {
+					(window as unknown as { require?: (m: string) => { shell?: { openExternal?: (u: string) => void } } })
+						.require?.("electron")
+						?.shell?.openExternal?.(url);
+				} catch {
+					/* fall back to clipboard below */
+				}
+				try {
+					void navigator.clipboard?.writeText(url);
+				} catch {
+					/* ignore */
+				}
+				new Notice("Opening browser for ChatGPT sign-in… (the login URL was copied to your clipboard).");
+			});
+			this.settings.openaiOAuth = creds;
+			await this.saveSettings();
+			new Notice("Signed in to ChatGPT.");
+			return true;
+		} catch (err) {
+			new Notice(`ChatGPT sign-in failed: ${err instanceof Error ? err.message : String(err)}`);
+			return false;
+		}
+	}
+
+	async logoutOpenAi(): Promise<void> {
+		this.settings.openaiOAuth = null;
+		await this.saveSettings();
+	}
+
+	/** Refresh the stored ChatGPT token; returns the fresh token or null. */
+	async refreshOpenAiToken(): Promise<{ accessToken: string; accountId: string } | null> {
+		const o = this.settings.openaiOAuth;
+		if (!o) return null;
+		try {
+			const creds = await refreshOpenAiCodex(o.refresh);
+			this.settings.openaiOAuth = creds;
+			await this.saveSettings();
+			return { accessToken: creds.access, accountId: creds.accountId };
+		} catch {
+			return null;
+		}
+	}
+
 	/** Display name for the currently selected engine. */
 	engineLabel(): string {
-		return this.settings.engine === "claude" ? "Claude Code" : "pi";
+		switch (this.settings.engine) {
+			case "claude":
+				return "Claude Code";
+			case "openai":
+				return "OpenAI";
+			default:
+				return "pi";
+		}
 	}
 
 	/** Open the panel and seed a fresh session with a page (and optional selection). */

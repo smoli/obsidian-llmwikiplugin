@@ -13,7 +13,7 @@ export interface SessionMessage {
 export interface SavedSession {
 	id: string;
 	name: string;
-	engine: "pi" | "claude";
+	engine: "pi" | "claude" | "openai";
 	/** claude session_id, or pi session id/file — used to resume the conversation. */
 	engineSessionId?: string;
 	model: string;

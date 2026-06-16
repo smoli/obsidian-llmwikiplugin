@@ -3,8 +3,8 @@ import type LlmAgentPlugin from "./main";
 import { ThinkingLevel } from "./rpc-types";
 
 export interface LlmAgentSettings {
-	/** Which agent engine to drive: pi or the Claude Code CLI. */
-	engine: "pi" | "claude";
+	/** Which agent engine to drive: pi, the Claude Code CLI, or the OpenAI API. */
+	engine: "pi" | "claude" | "openai";
 	/** Command or absolute path used to launch pi. */
 	piPath: string;
 	/**
@@ -58,6 +58,18 @@ export interface LlmAgentSettings {
 	/** Whether AGENTS.md appends to or replaces Claude Code's system prompt. */
 	claudeAgentsMode: "append" | "replace";
 
+	// --- OpenAI engine (direct API) ---
+	/** How to authenticate to OpenAI: an API key, or a ChatGPT subscription login. */
+	openaiAuthMode: "apikey" | "subscription";
+	/** OpenAI API key (sent as a Bearer token). Stored in data.json (plaintext). */
+	openaiApiKey: string;
+	/** API base URL; override for Azure / OpenAI-compatible endpoints. */
+	openaiBaseUrl: string;
+	/** Model id, e.g. "gpt-5". */
+	openaiModel: string;
+	/** ChatGPT (Codex) OAuth credentials when using subscription auth. */
+	openaiOAuth: { access: string; refresh: string; expires: number; accountId: string } | null;
+
 	/** Pre-fill the commit dialog with an engine-generated message. */
 	gitSuggestCommitMessage: boolean;
 
@@ -86,6 +98,11 @@ export const DEFAULT_SETTINGS: LlmAgentSettings = {
 	claudePermissionMode: "bypassPermissions",
 	claudeModel: "default",
 	claudeAgentsMode: "append",
+	openaiAuthMode: "apikey",
+	openaiApiKey: "",
+	openaiBaseUrl: "https://api.openai.com/v1",
+	openaiModel: "gpt-5",
+	openaiOAuth: null,
 	gitSuggestCommitMessage: true,
 	selectedPersona: "",
 	chatSaveFolder: "Chats",
@@ -120,6 +137,7 @@ export class LlmAgentSettingTab extends PluginSettingTab {
 			.addDropdown((d) => {
 				d.addOption("pi", "pi");
 				d.addOption("claude", "Claude Code");
+				d.addOption("openai", "OpenAI");
 				d.setValue(this.plugin.settings.engine).onChange(async (v) => {
 					this.plugin.settings.engine = v as LlmAgentSettings["engine"];
 					await this.plugin.saveSettings();
@@ -330,6 +348,95 @@ export class LlmAgentSettingTab extends PluginSettingTab {
 					await this.plugin.saveSettings();
 				});
 			});
+
+		// ----- OpenAI engine -----
+		containerEl.createEl("h3", { text: "OpenAI" });
+		containerEl.createEl("p", {
+			text:
+				"Used when the engine is set to OpenAI: the plugin talks to OpenAI directly, confined to the working directory. Credentials are stored in this plugin's data.json (plaintext) — keep that in mind.",
+			cls: "setting-item-description",
+		});
+
+		new Setting(containerEl)
+			.setName("Authentication")
+			.setDesc("API key, or sign in with a ChatGPT subscription (Plus/Pro/Team, Codex flow).")
+			.addDropdown((d) => {
+				d.addOption("apikey", "API key");
+				d.addOption("subscription", "ChatGPT subscription login");
+				d.setValue(this.plugin.settings.openaiAuthMode).onChange(async (v) => {
+					this.plugin.settings.openaiAuthMode = v as LlmAgentSettings["openaiAuthMode"];
+					await this.plugin.saveSettings();
+					this.display();
+				});
+			});
+
+		if (this.plugin.settings.openaiAuthMode === "subscription") {
+			const oauth = this.plugin.settings.openaiOAuth;
+			new Setting(containerEl)
+				.setName("ChatGPT sign-in")
+				.setDesc(
+					oauth
+						? `Signed in (account …${oauth.accountId.slice(-6)}). Uses the undocumented Codex backend — may change without notice.`
+						: "Not signed in. A browser window opens for OpenAI login (uses the Codex flow)."
+				)
+				.addButton((b) =>
+					b.setButtonText(oauth ? "Re-sign in" : "Sign in with ChatGPT").onClick(async () => {
+						b.setDisabled(true).setButtonText("Waiting for browser…");
+						const ok = await this.plugin.loginOpenAi();
+						if (ok) this.display();
+						else b.setDisabled(false).setButtonText("Sign in with ChatGPT");
+					})
+				)
+				.then((s) => {
+					if (oauth) {
+						s.addExtraButton((b) =>
+							b.setIcon("log-out").setTooltip("Sign out").onClick(async () => {
+								await this.plugin.logoutOpenAi();
+								this.display();
+							})
+						);
+					}
+				});
+		} else {
+			new Setting(containerEl)
+				.setName("API key")
+				.setDesc("Sent as a Bearer token. Stored locally in data.json.")
+				.addText((t) => {
+					t.setPlaceholder("sk-…")
+						.setValue(this.plugin.settings.openaiApiKey)
+						.onChange(async (v) => {
+							this.plugin.settings.openaiApiKey = v.trim();
+							await this.plugin.saveSettings();
+						});
+					t.inputEl.type = "password";
+				});
+		}
+
+		new Setting(containerEl)
+			.setName("Model")
+			.setDesc("OpenAI model id, e.g. gpt-5.")
+			.addText((t) =>
+				t
+					.setPlaceholder("gpt-5")
+					.setValue(this.plugin.settings.openaiModel)
+					.onChange(async (v) => {
+						this.plugin.settings.openaiModel = v.trim() || "gpt-5";
+						await this.plugin.saveSettings();
+					})
+			);
+
+		new Setting(containerEl)
+			.setName("Base URL")
+			.setDesc("API base URL. Override for Azure OpenAI or OpenAI-compatible endpoints.")
+			.addText((t) =>
+				t
+					.setPlaceholder("https://api.openai.com/v1")
+					.setValue(this.plugin.settings.openaiBaseUrl)
+					.onChange(async (v) => {
+						this.plugin.settings.openaiBaseUrl = v.trim().replace(/\/+$/, "") || "https://api.openai.com/v1";
+						await this.plugin.saveSettings();
+					})
+			);
 
 		// ----- chats -----
 		containerEl.createEl("h3", { text: "Chats" });

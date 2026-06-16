@@ -228,6 +228,7 @@ export class LlmChatView extends ItemView {
 		this.engineSelect = engineField.createEl("select", { cls: "llm-select llm-engine-select" });
 		this.engineSelect.createEl("option", { text: "pi", value: "pi" });
 		this.engineSelect.createEl("option", { text: "Claude Code", value: "claude" });
+		this.engineSelect.createEl("option", { text: "OpenAI", value: "openai" });
 		this.engineSelect.value = this.plugin.settings.engine;
 		this.registerDomEvent(this.engineSelect, "change", () => this.onEngineChange());
 
@@ -267,7 +268,7 @@ export class LlmChatView extends ItemView {
 			this.engineSelect.value = this.plugin.settings.engine;
 			return;
 		}
-		const engine = this.engineSelect.value as "pi" | "claude";
+		const engine = this.engineSelect.value as "pi" | "claude" | "openai";
 		this.plugin.settings.engine = engine;
 		await this.plugin.saveSettings();
 		// Engine session ids aren't portable across engines, so start a new session.
