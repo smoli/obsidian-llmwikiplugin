@@ -4,6 +4,7 @@ import { DEFAULT_SETTINGS, LlmAgentSettingTab, LlmAgentSettings } from "./settin
 import { SessionStore, SavedSession, newSessionId } from "./sessions";
 import { SessionManager } from "./session-runtime";
 import { loginOpenAiCodex, refreshOpenAiCodex } from "./openai-oauth";
+import { loadSecrets, saveSecrets } from "./secrets";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
@@ -639,10 +640,33 @@ export default class LlmAgentPlugin extends Plugin {
 	}
 
 	async loadSettings(): Promise<void> {
-		this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData());
+		const data = (await this.loadData()) as Partial<LlmAgentSettings> | null;
+		this.settings = Object.assign({}, DEFAULT_SETTINGS, data);
+
+		// Secrets live outside the vault (see secrets.ts). Overlay them, and migrate
+		// any key/token that an older build wrote into data.json out of the vault.
+		const secrets = loadSecrets();
+		const leakedKey = data?.openaiApiKey || data?.openaiOAuth;
+		if (data?.openaiApiKey && !secrets.openaiApiKey) secrets.openaiApiKey = data.openaiApiKey;
+		if (data?.openaiOAuth && !secrets.openaiOAuth) secrets.openaiOAuth = data.openaiOAuth;
+		if (leakedKey) saveSecrets(secrets);
+
+		this.settings.openaiApiKey = secrets.openaiApiKey ?? "";
+		this.settings.openaiOAuth = secrets.openaiOAuth ?? null;
+
+		// Rewrite data.json without the secrets if they were ever stored there.
+		if (leakedKey) await this.saveSettings();
 	}
 
 	async saveSettings(): Promise<void> {
-		await this.saveData(this.settings);
+		// Secrets go to the home-dir file, never into the vault's data.json.
+		saveSecrets({
+			openaiApiKey: this.settings.openaiApiKey || undefined,
+			openaiOAuth: this.settings.openaiOAuth ?? null,
+		});
+		const persisted = { ...this.settings } as Partial<LlmAgentSettings>;
+		delete persisted.openaiApiKey;
+		delete persisted.openaiOAuth;
+		await this.saveData(persisted);
 	}
 }

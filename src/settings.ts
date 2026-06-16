@@ -353,7 +353,7 @@ export class LlmAgentSettingTab extends PluginSettingTab {
 		containerEl.createEl("h3", { text: "OpenAI" });
 		containerEl.createEl("p", {
 			text:
-				"Used when the engine is set to OpenAI: the plugin talks to OpenAI directly, confined to the working directory. Credentials are stored in this plugin's data.json (plaintext) — keep that in mind.",
+				"Used when the engine is set to OpenAI: the plugin talks to OpenAI directly, confined to the working directory. Credentials (API key / ChatGPT tokens) are stored OUTSIDE the vault, in ~/.sts-llm-wiki/credentials.json — not in the vault's data.json, so they can't leak into a vault commit.",
 			cls: "setting-item-description",
 		});
 
@@ -400,7 +400,7 @@ export class LlmAgentSettingTab extends PluginSettingTab {
 		} else {
 			new Setting(containerEl)
 				.setName("API key")
-				.setDesc("Sent as a Bearer token. Stored locally in data.json.")
+				.setDesc("Sent as a Bearer token. Stored in ~/.sts-llm-wiki/credentials.json (outside the vault).")
 				.addText((t) => {
 					t.setPlaceholder("sk-…")
 						.setValue(this.plugin.settings.openaiApiKey)
