@@ -87,15 +87,24 @@ file access yet (just talking to the model).
 Not yet: `/v1/models` listing, cost, reasoning→thinking (Phase 5). Untested against
 a live key — needs the user's `openaiApiKey`.
 
-### Phase 2 — Read-only tools + agent loop (YOLO, sandboxed) ⏳ NEXT
+### Phase 2 — Read-only tools + agent loop (YOLO, sandboxed) ✅ DONE
 
-- [ ] `resolveInVault()` path sandbox helper + tests.
-- [ ] Tools: `read_file`, `list_dir`, `grep` (read-only) as function schemas.
-- [ ] Agent loop: collect function calls, execute, append `function_call_output`,
-      continue until a final text answer; auto-execute (YOLO).
-- [ ] Map tool execution to `tool-start` / `tool-update` / `tool-end` (so the
-      existing tool blocks + "calling …" busy label just work).
-- [ ] Now it can answer questions grounded in the wiki.
+- [x] `resolveInVault()` path sandbox helper (lexical `..`/absolute reject +
+      symlink realpath re-check) in `src/openai-tools.ts`.
+- [x] Tools: `read_file` (line-numbered, offset/limit), `list_dir`, `grep`
+      (regex walk, skips .git/.obsidian/node_modules, capped) as function schemas
+      (Responses flat `{type:"function", …}` shape).
+- [x] Agent loop in `OpenAiBackend.prompt`: `runTurn()` streams a turn and
+      collects function calls + raw output items; execute each, append
+      `function_call_output`, repeat until a text-only answer (cap 25 iters).
+      Auto-execute (YOLO). API-key mode rides `previous_response_id`; subscription
+      mode replays the full item list (`this.items`, incl. model output +
+      reasoning + tool outputs).
+- [x] Tool execution → `tool-start` (on args.done, parsed args) / `tool-end`
+      (result or error) so the existing tool blocks + "calling …" busy label work.
+- [x] Now it can answer questions grounded in the wiki. Build green, deployed.
+
+Not yet: tests for `resolveInVault`; parallel tool calls run sequentially.
 
 ### Phase 3 — Mutating tools (YOLO, sandboxed) ⬜ TODO
 
@@ -181,6 +190,12 @@ Two ways to authenticate (settings → OpenAI → Authentication):
   replay, 401→refresh). Settings: auth-mode dropdown + "Sign in with ChatGPT"
   button; plugin `loginOpenAi`/`logoutOpenAi`/`refreshOpenAiToken`. Build green,
   deployed. **Untested against a live ChatGPT login.**
+- **Phase 2 done** — read-only tool loop. `src/openai-tools.ts` adds the
+  `resolveInVault` sandbox + `read_file`/`list_dir`/`grep`. `OpenAiBackend` now
+  runs the agent loop (`runTurn` → execute calls → feed `function_call_output`
+  back → repeat), YOLO but vault-confined; tools include schemas in the request
+  and map to `tool-start`/`tool-end`. Both auth modes handle tool calls (apikey
+  via `previous_response_id`, subscription via full item replay). Deployed.
 - **Secret storage upgraded (keychain)** — `src/secrets.ts` now encrypts the
   out-of-vault `~/.sts-llm-wiki/credentials.json` with Electron `safeStorage` (OS
   keychain: Windows DPAPI / macOS Keychain / Linux libsecret) when reachable, with

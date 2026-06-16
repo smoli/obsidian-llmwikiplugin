@@ -10,8 +10,32 @@ import {
 	PromptResult,
 } from "./backend";
 import { ThinkingLevel } from "./rpc-types";
+import { TOOL_MAP, ToolContext, toolSchemas } from "./openai-tools";
 
 const CODEX_URL = "https://chatgpt.com/backend-api/codex/responses";
+
+/** Safety cap on model→tool→model round-trips within a single prompt. */
+const MAX_TOOL_ITERATIONS = 25;
+
+/** A heterogeneous Responses API input/output item (message, function_call, …). */
+type ResponsesItem = Record<string, any>;
+
+/** A function call the model asked us to execute this turn. */
+interface ToolCall {
+	/** Output-item id (arg deltas reference this). */
+	itemId: string;
+	/** Stable id linking the call to its function_call_output. */
+	callId: string;
+	name: string;
+	args: string;
+}
+
+/** What one model turn produced: streamed text, tool calls, and raw output items. */
+interface TurnResult {
+	text: string;
+	calls: ToolCall[];
+	outputItems: ResponsesItem[];
+}
 
 export type OpenAiAuth =
 	| { mode: "apikey"; apiKey: string; baseUrl: string }
@@ -35,18 +59,17 @@ export interface OpenAiBackendOptions {
 	history?: { role: "user" | "assistant"; text: string }[];
 }
 
-interface Turn {
-	role: "user" | "assistant";
-	text: string;
-}
-
 /**
  * Talks to OpenAI directly. Two auth modes:
  *  - **apikey**: Responses API with `store: true` + `previous_response_id` (server
- *    keeps the conversation; we send only the new turn).
+ *    keeps the conversation; we send only the new turn / tool outputs).
  *  - **subscription**: the Codex ChatGPT backend, which forbids `store: true`, so
- *    we replay the full message history each turn. Token refreshed on 401.
- * Phase 1: streaming text only — no tools yet.
+ *    we replay the full item history each turn. Token refreshed on 401.
+ *
+ * Because the OpenAI endpoint is not an agent, *we* run the tool loop: stream a
+ * turn, execute any function calls against the vault (read-only, Phase 2), feed
+ * the outputs back, and repeat until the model returns a final text answer.
+ * Tools run in YOLO mode but every path is confined to the working dir.
  */
 export class OpenAiBackend extends BaseBackend {
 	readonly engineName = "openai";
@@ -55,7 +78,8 @@ export class OpenAiBackend extends BaseBackend {
 	private model: string;
 	private system = "";
 	private previousResponseId?: string;
-	private messages: Turn[] = [];
+	/** Full Responses item history for subscription replay (store:false). */
+	private items: ResponsesItem[] = [];
 	private accessToken: string;
 	private accountId: string;
 	private started = false;
@@ -89,7 +113,7 @@ export class OpenAiBackend extends BaseBackend {
 			}
 		}
 		if (this.opts.auth.mode === "subscription" && this.opts.history) {
-			this.messages = this.opts.history.map((m) => ({ role: m.role, text: m.text }));
+			this.items = this.opts.history.map((m) => this.messageItem(m.role, m.text));
 		}
 		this.started = true;
 	}
@@ -107,7 +131,7 @@ export class OpenAiBackend extends BaseBackend {
 
 	async newSession(): Promise<void> {
 		this.previousResponseId = undefined;
-		this.messages = [];
+		this.items = [];
 		this.lastStats = null;
 	}
 
@@ -117,9 +141,55 @@ export class OpenAiBackend extends BaseBackend {
 
 		this.busy = true;
 		this.aborted = false;
-		let textOpen = false;
-		let assistant = "";
 		this.emitEvent({ type: "run-start" });
+
+		try {
+			// Seed the turn: subscription replays the whole item list; apikey sends
+			// only the new user message and relies on previous_response_id.
+			const userMsg = this.messageItem("user", text);
+			if (this.opts.auth.mode === "subscription") this.items.push(userMsg);
+			let pendingInput: ResponsesItem[] = [userMsg];
+
+			for (let i = 0; i < MAX_TOOL_ITERATIONS; i++) {
+				const turn = await this.runTurn(pendingInput);
+				// Record the model's own output items so subscription replay stays faithful.
+				if (this.opts.auth.mode === "subscription") this.items.push(...turn.outputItems);
+
+				if (turn.calls.length === 0) {
+					this.emitEvent({ type: "run-end" });
+					return { ok: true };
+				}
+
+				// Execute each call (YOLO, vault-sandboxed) and feed the outputs back.
+				const outputs: ResponsesItem[] = [];
+				for (const call of turn.calls) {
+					if (this.aborted) throw new Error("aborted");
+					const output = await this.executeTool(call);
+					outputs.push({ type: "function_call_output", call_id: call.callId, output });
+				}
+				if (this.opts.auth.mode === "subscription") this.items.push(...outputs);
+				pendingInput = outputs;
+			}
+			throw new Error(`tool loop exceeded ${MAX_TOOL_ITERATIONS} iterations`);
+		} catch (err) {
+			if (!this.aborted) {
+				this.stderr = err instanceof Error ? err.message : String(err);
+				this.emitEvent({ type: "error", message: this.stderr });
+			}
+			this.emitEvent({ type: "run-end" });
+			return { ok: false, error: this.aborted ? "aborted" : this.stderr };
+		} finally {
+			this.busy = false;
+			this.req = null;
+		}
+	}
+
+	/** Stream one model turn: emit text/tool events, collect tool calls + output items. */
+	private async runTurn(inputItems: ResponsesItem[]): Promise<TurnResult> {
+		let textOpen = false;
+		let text = "";
+		const callsByItem = new Map<string, ToolCall>();
+		let outputItems: ResponsesItem[] = [];
 
 		const onEvent = (data: any) => {
 			switch (data.type) {
@@ -132,12 +202,36 @@ export class OpenAiBackend extends BaseBackend {
 						textOpen = true;
 					}
 					if (typeof data.delta === "string") {
-						assistant += data.delta;
+						text += data.delta;
 						this.emitEvent({ type: "text-delta", delta: data.delta });
 					}
 					break;
+				case "response.output_item.added":
+					if (data.item?.type === "function_call") {
+						callsByItem.set(data.item.id, {
+							itemId: data.item.id,
+							callId: data.item.call_id,
+							name: data.item.name,
+							args: data.item.arguments ?? "",
+						});
+					}
+					break;
+				case "response.function_call_arguments.delta": {
+					const c = callsByItem.get(data.item_id);
+					if (c && typeof data.delta === "string") c.args += data.delta;
+					break;
+				}
+				case "response.function_call_arguments.done": {
+					const c = callsByItem.get(data.item_id);
+					if (c) {
+						if (typeof data.arguments === "string") c.args = data.arguments;
+						this.emitToolStart(c);
+					}
+					break;
+				}
 				case "response.completed":
 					if (data.response?.id) this.previousResponseId = data.response.id;
+					if (Array.isArray(data.response?.output)) outputItems = data.response.output;
 					this.applyUsage(data.response?.usage);
 					break;
 				case "response.failed":
@@ -149,26 +243,58 @@ export class OpenAiBackend extends BaseBackend {
 		};
 
 		try {
-			if (this.opts.auth.mode === "subscription") this.messages.push({ role: "user", text });
-			await this.runRequest(text, onEvent);
-			if (this.opts.auth.mode === "subscription" && assistant.trim()) {
-				this.messages.push({ role: "assistant", text: assistant });
-			}
-			if (textOpen) this.emitEvent({ type: "text-end" });
-			this.emitEvent({ type: "run-end" });
-			return { ok: true };
-		} catch (err) {
-			if (textOpen) this.emitEvent({ type: "text-end" });
-			if (!this.aborted) {
-				this.stderr = err instanceof Error ? err.message : String(err);
-				this.emitEvent({ type: "error", message: this.stderr });
-			}
-			this.emitEvent({ type: "run-end" });
-			return { ok: false, error: this.stderr };
+			await this.runRequest(inputItems, onEvent);
 		} finally {
-			this.busy = false;
-			this.req = null;
+			if (textOpen) this.emitEvent({ type: "text-end" });
 		}
+		return { text, calls: [...callsByItem.values()], outputItems };
+	}
+
+	private emitToolStart(call: ToolCall): void {
+		let parsed: Record<string, unknown> = {};
+		try {
+			parsed = call.args ? JSON.parse(call.args) : {};
+		} catch {
+			/* show raw args if not yet valid JSON */
+		}
+		this.emitEvent({ type: "tool-start", id: call.callId, name: call.name, args: parsed });
+	}
+
+	/** Execute a tool call against the vault and emit its result block. */
+	private async executeTool(call: ToolCall): Promise<string> {
+		const ctx: ToolContext = { cwd: this.opts.cwd };
+		const tool = TOOL_MAP.get(call.name);
+		let args: Record<string, unknown> = {};
+		try {
+			args = call.args ? JSON.parse(call.args) : {};
+		} catch {
+			const msg = `Error: could not parse arguments for ${call.name}: ${call.args}`;
+			this.emitEvent({ type: "tool-end", id: call.callId, text: msg, isError: true });
+			return msg;
+		}
+		if (!tool) {
+			const msg = `Error: unknown tool '${call.name}'`;
+			this.emitEvent({ type: "tool-end", id: call.callId, text: msg, isError: true });
+			return msg;
+		}
+		try {
+			const result = await tool.run(args, ctx);
+			this.emitEvent({ type: "tool-end", id: call.callId, text: result, isError: false });
+			return result;
+		} catch (err) {
+			const msg = `Error: ${err instanceof Error ? err.message : String(err)}`;
+			this.emitEvent({ type: "tool-end", id: call.callId, text: msg, isError: true });
+			return msg;
+		}
+	}
+
+	/** Build a Responses message item for the given role/text. */
+	private messageItem(role: "user" | "assistant", text: string): ResponsesItem {
+		return {
+			type: "message",
+			role,
+			content: [{ type: role === "user" ? "input_text" : "output_text", text }],
+		};
 	}
 
 	async getEngineSessionId(): Promise<string | undefined> {
@@ -196,16 +322,16 @@ export class OpenAiBackend extends BaseBackend {
 	// --------------------------------------------------------------- internals
 
 	/** Send the request; on a 401 in subscription mode, refresh the token and retry once. */
-	private async runRequest(text: string, onEvent: (data: any) => void): Promise<void> {
+	private async runRequest(inputItems: ResponsesItem[], onEvent: (data: any) => void): Promise<void> {
 		try {
-			await this.streamRequest(this.buildUrl(), this.buildHeaders(), this.buildBody(text), onEvent);
+			await this.streamRequest(this.buildUrl(), this.buildHeaders(), this.buildBody(inputItems), onEvent);
 		} catch (err: any) {
 			if (this.opts.auth.mode === "subscription" && err?.status === 401 && !this.aborted) {
 				const fresh = await this.opts.auth.refresh();
 				if (!fresh) throw new Error("ChatGPT session expired — sign in again in settings.");
 				this.accessToken = fresh.accessToken;
 				this.accountId = fresh.accountId;
-				await this.streamRequest(this.buildUrl(), this.buildHeaders(), this.buildBody(text), onEvent);
+				await this.streamRequest(this.buildUrl(), this.buildHeaders(), this.buildBody(inputItems), onEvent);
 			} else {
 				throw err;
 			}
@@ -235,15 +361,14 @@ export class OpenAiBackend extends BaseBackend {
 		};
 	}
 
-	private buildBody(text: string): string {
+	private buildBody(inputItems: ResponsesItem[]): string {
+		const tools = toolSchemas();
 		if (this.opts.auth.mode === "subscription") {
 			return JSON.stringify({
 				model: this.model,
 				instructions: this.system || "You are a helpful assistant.",
-				input: this.messages.map((m) => ({
-					role: m.role,
-					content: [{ type: m.role === "user" ? "input_text" : "output_text", text: m.text }],
-				})),
+				input: this.items,
+				tools,
 				stream: true,
 				store: false,
 				include: ["reasoning.encrypted_content"],
@@ -252,7 +377,8 @@ export class OpenAiBackend extends BaseBackend {
 		return JSON.stringify({
 			model: this.model,
 			instructions: this.system || undefined,
-			input: text,
+			input: inputItems,
+			tools,
 			stream: true,
 			store: true,
 			previous_response_id: this.previousResponseId || undefined,
