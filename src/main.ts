@@ -1,7 +1,7 @@
 import { Editor, FileSystemAdapter, MarkdownFileInfo, MarkdownView, Menu, Notice, Plugin, TAbstractFile, TFile, WorkspaceLeaf } from "obsidian";
 import { VIEW_TYPE, LlmChatView } from "./chat-view";
 import { DEFAULT_SETTINGS, LlmAgentSettingTab, LlmAgentSettings } from "./settings";
-import { SessionStore } from "./sessions";
+import { SessionStore, SavedSession, newSessionId } from "./sessions";
 import { SessionManager } from "./session-runtime";
 import * as path from "path";
 import * as fs from "fs";
@@ -317,10 +317,49 @@ export default class LlmAgentPlugin extends Plugin {
 			.replace(/\{\{files\}\}/g, list)
 			.replace(/\{\{count\}\}/g, String(files.length));
 
-		const leaf = await this.activateView();
-		if (leaf?.view instanceof LlmChatView) {
-			await leaf.view.runAutomation(prompt, this.settings.autoRunPersona);
+		await this.runAutomationSession(prompt);
+	}
+
+	/**
+	 * Run an automation prompt in its **own background session/runtime** — it does
+	 * not wait for, switch to, or disturb the foreground session. The new session
+	 * appears in the sidebar (streaming dot), ready to open when convenient.
+	 */
+	private async runAutomationSession(prompt: string): Promise<void> {
+		const now = Date.now();
+		const session: SavedSession = {
+			id: newSessionId(),
+			name: "",
+			engine: this.settings.engine,
+			engineSessionId: undefined,
+			model: "",
+			persona: this.settings.autoRunPersona,
+			transcript: [],
+			createdAt: now,
+			updatedAt: now,
+		};
+		this.sessionStore.upsert(session);
+
+		const runtime = this.sessionManager.acquire(session);
+		const err = runtime.start();
+		if (err) {
+			new Notice(`Automation: ${err}`);
+			return;
 		}
+		// Wait briefly for the engine process to come up before prompting.
+		for (let i = 0; i < 50 && !runtime.running; i++) {
+			await new Promise((r) => window.setTimeout(r, 200));
+		}
+		if (!runtime.running) {
+			new Notice("Automation: the agent did not start.");
+			return;
+		}
+		await runtime.prompt(prompt, false);
+		this.sessionManager.enforceCap();
+
+		// Surface it (open the panel if needed) without switching the active session.
+		void this.activateView();
+		this.refreshSessionLists();
 	}
 
 	/** Convert a vault-relative path to one relative to the agent's working dir. */

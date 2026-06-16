@@ -1,8 +1,12 @@
 import { App } from "obsidian";
+import { ResponseEnvelope } from "./response-format";
 
 export interface SessionMessage {
 	role: "user" | "assistant";
 	text: string;
+	/** For schema responses: the parsed blocks, so chips/checkboxes restore on
+	 *  session switch (the `text` stays the plain-markdown form for saved chats). */
+	envelopes?: ResponseEnvelope[];
 }
 
 /** A persisted chat session: display record + the engine id needed to resume it. */
@@ -17,6 +21,8 @@ export interface SavedSession {
 	transcript: SessionMessage[];
 	createdAt: number;
 	updatedAt: number;
+	/** A reply finished while this session wasn't being viewed (sidebar badge). */
+	unseen?: boolean;
 }
 
 /**

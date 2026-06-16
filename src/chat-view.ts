@@ -16,7 +16,7 @@ import { AgentBackend, BackendEvent, BackendModel, NormalizedStats, PermissionRe
 import { SessionRuntime } from "./session-runtime";
 import { ResponseEnvelope, parseResponseEnvelopes } from "./response-format";
 import { ExtensionUIRequest, ThinkingLevel } from "./rpc-types";
-import { SavedSession, newSessionId } from "./sessions";
+import { SavedSession, SessionMessage, newSessionId } from "./sessions";
 import { showUIDialog } from "./ui-dialog";
 
 export const VIEW_TYPE = "llm-agent-chat";
@@ -641,6 +641,7 @@ export class LlmChatView extends ItemView {
 		});
 		runtime.markSeen();
 		this.adoptRuntimeState();
+		this.plugin.sessionManager.enforceCap();
 
 		const resumed = this.session.engineSessionId;
 		this.setStatus(`Connected · ${resumed ? `resumed ${resumed.slice(0, 8)}` : "new session"} · cwd: ${cwd}`);
@@ -706,30 +707,6 @@ export class LlmChatView extends ItemView {
 		if (!this.backend) await this.connect();
 		for (let i = 0; i < 50 && !this.backend?.running; i++) {
 			await new Promise((r) => window.setTimeout(r, 200));
-		}
-	}
-
-	/**
-	 * Run a folder-watch automation: wait for any in-flight response to finish,
-	 * then open a *fresh* session with the configured persona and submit the
-	 * prompt. The user's previous session is kept in the sidebar.
-	 */
-	async runAutomation(text: string, persona: string): Promise<void> {
-		await this.waitUntilIdle();
-		if (this.plugin.settings.selectedPersona !== persona) {
-			this.plugin.settings.selectedPersona = persona;
-			await this.plugin.saveSettings();
-		}
-		await this.startFreshSession(); // makeSession + connect pick up the persona
-		await this.ensureRunning();
-		await this.submitMessage(text);
-	}
-
-	/** Resolve once no response is streaming (capped so a stuck run can't block forever). */
-	private async waitUntilIdle(maxMs = 900_000): Promise<void> {
-		const start = Date.now();
-		while (this.streaming && Date.now() - start < maxMs) {
-			await new Promise((r) => window.setTimeout(r, 250));
 		}
 	}
 
@@ -928,11 +905,12 @@ export class LlmChatView extends ItemView {
 			this.registerDomEvent(item, "click", () => void this.switchSession(s.id));
 			this.registerDomEvent(item, "contextmenu", (e) => this.openSessionItemMenu(e, s.id));
 
-			// Status dot for background runtimes: streaming or has an unseen reply.
+			// Status dot for background sessions: streaming (live) or unseen reply
+			// (persisted, so it survives an LRU eviction / restart).
 			const rt = this.plugin.sessionManager.get(s.id);
 			const dot = item.createSpan({ cls: "llm-session-dot" });
 			if (!active && rt?.streaming) dot.addClass("is-streaming");
-			else if (!active && rt?.hasUnseenReply) dot.addClass("is-unseen");
+			else if (!active && s.unseen) dot.addClass("is-unseen");
 
 			const body = item.createDiv({ cls: "llm-session-body" });
 			body.createDiv({ cls: "llm-session-name", text: s.name || "New chat" });
@@ -1050,7 +1028,7 @@ export class LlmChatView extends ItemView {
 	private renderTranscriptFromSession(): void {
 		for (const m of this.session.transcript) {
 			if (m.role === "user") this.renderUserBlock(m.text);
-			else this.renderAssistantBlock(m.text);
+			else this.renderAssistantBlock(m);
 		}
 	}
 
@@ -1386,10 +1364,12 @@ export class LlmChatView extends ItemView {
 		this.scrollToBottom(true);
 	}
 
-	private renderAssistantBlock(text: string): void {
+	private renderAssistantBlock(m: SessionMessage): void {
 		const block = this.appendBlock("llm-msg llm-msg-assistant");
 		const body = block.createDiv({ cls: "llm-msg-body" });
-		this.renderMarkdownInto(body, text);
+		// Restore structured chips/checkboxes when the message carries envelopes.
+		if (m.envelopes && m.envelopes.length) this.renderStructuredInto(body, m.envelopes);
+		else this.renderMarkdownInto(body, m.text);
 		this.scrollToBottom();
 	}
 

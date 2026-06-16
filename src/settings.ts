@@ -28,6 +28,8 @@ export interface LlmAgentSettings {
 	showToolCalls: boolean;
 	/** Auto-attach the current editor selection to open chat panels as a context chip. */
 	autoAttachSelection: boolean;
+	/** Max number of warm session runtimes (live engine processes) to keep. */
+	maxWarmSessions: number;
 	/**
 	 * How to handle tool-permission / confirmation dialogs raised by pi
 	 * extensions: ask the user, always allow, or always block.
@@ -77,6 +79,7 @@ export const DEFAULT_SETTINGS: LlmAgentSettings = {
 	showThinking: false,
 	showToolCalls: true,
 	autoAttachSelection: false,
+	maxWarmSessions: 4,
 	dialogPolicy: "ask",
 	sidebarCollapsed: false,
 	claudePath: "claude",
@@ -158,6 +161,22 @@ export class LlmAgentSettingTab extends PluginSettingTab {
 					this.plugin.settings.autoAttachSelection = v;
 					await this.plugin.saveSettings();
 				})
+			);
+
+		new Setting(containerEl)
+			.setName("Max background sessions")
+			.setDesc(
+				"How many session engine processes to keep running at once. The active session and any still streaming are always kept; extra idle background sessions beyond this limit are shut down (least-recently-used first) and resume on demand when reopened."
+			)
+			.addText((t) =>
+				t
+					.setPlaceholder("4")
+					.setValue(String(this.plugin.settings.maxWarmSessions))
+					.onChange(async (v) => {
+						const n = parseInt(v, 10);
+						this.plugin.settings.maxWarmSessions = Number.isFinite(n) && n >= 1 ? n : 4;
+						await this.plugin.saveSettings();
+					})
 			);
 
 		containerEl.createEl("h3", { text: "pi" });
