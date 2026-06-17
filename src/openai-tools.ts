@@ -193,14 +193,103 @@ const grep: ToolDef = {
 	},
 };
 
-/** The read-only tool set available in Phase 2. */
+const writeFile: ToolDef = {
+	name: "write_file",
+	description:
+		"Create or overwrite a text file in the vault with the given content. Parent " +
+		"directories are created as needed. Use edit_file for small changes to a large file.",
+	parameters: {
+		type: "object",
+		properties: {
+			path: { type: "string", description: "Vault-relative path of the file to write." },
+			content: { type: "string", description: "Full UTF-8 content of the file." },
+		},
+		required: ["path", "content"],
+		additionalProperties: false,
+	},
+	async run(args, ctx) {
+		const abs = resolveInVault(ctx.cwd, args.path);
+		if (typeof args.content !== "string") throw new Error("'content' must be a string");
+		try {
+			if (fs.statSync(abs).isDirectory()) throw new Error(`${String(args.path)} is a directory`);
+		} catch (e) {
+			if ((e as NodeJS.ErrnoException).code !== "ENOENT") throw e;
+		}
+		fs.mkdirSync(path.dirname(abs), { recursive: true });
+		fs.writeFileSync(abs, args.content, "utf8");
+		const lines = args.content === "" ? 0 : args.content.split("\n").length;
+		return `Wrote ${String(args.path)} (${lines} line${lines === 1 ? "" : "s"}, ${Buffer.byteLength(args.content)} bytes).`;
+	},
+};
+
+const editFile: ToolDef = {
+	name: "edit_file",
+	description:
+		"Replace an exact substring in an existing vault file. By default 'old_string' must " +
+		"appear exactly once; set 'replace_all' to replace every occurrence.",
+	parameters: {
+		type: "object",
+		properties: {
+			path: { type: "string", description: "Vault-relative path of the file to edit." },
+			old_string: { type: "string", description: "Exact text to find (include enough context to be unique)." },
+			new_string: { type: "string", description: "Replacement text." },
+			replace_all: { type: "boolean", description: "Replace all occurrences (default false)." },
+		},
+		required: ["path", "old_string", "new_string"],
+		additionalProperties: false,
+	},
+	async run(args, ctx) {
+		const abs = resolveInVault(ctx.cwd, args.path);
+		const oldStr = args.old_string;
+		const newStr = args.new_string;
+		if (typeof oldStr !== "string" || typeof newStr !== "string") throw new Error("old_string/new_string must be strings");
+		if (oldStr === "") throw new Error("old_string must not be empty");
+		if (oldStr === newStr) throw new Error("old_string and new_string are identical");
+		const stat = fs.statSync(abs);
+		if (stat.isDirectory()) throw new Error(`${String(args.path)} is a directory`);
+		if (stat.size > MAX_FILE_BYTES) throw new Error(`file too large (${stat.size} bytes)`);
+		const content = fs.readFileSync(abs, "utf8");
+		const count = content.split(oldStr).length - 1;
+		if (count === 0) throw new Error("old_string not found in file");
+		if (count > 1 && !args.replace_all) throw new Error(`old_string is not unique (${count} matches); add context or set replace_all`);
+		const updated = args.replace_all ? content.split(oldStr).join(newStr) : content.replace(oldStr, newStr);
+		fs.writeFileSync(abs, updated, "utf8");
+		return `Edited ${String(args.path)} (${args.replace_all ? count : 1} replacement${(args.replace_all ? count : 1) === 1 ? "" : "s"}).`;
+	},
+};
+
+const mkdir: ToolDef = {
+	name: "mkdir",
+	description: "Create a directory (and any missing parents) in the vault.",
+	parameters: {
+		type: "object",
+		properties: {
+			path: { type: "string", description: "Vault-relative directory path to create." },
+		},
+		required: ["path"],
+		additionalProperties: false,
+	},
+	async run(args, ctx) {
+		const abs = resolveInVault(ctx.cwd, args.path);
+		fs.mkdirSync(abs, { recursive: true });
+		return `Created directory ${String(args.path)}.`;
+	},
+};
+
+/** Read-only tools (Phase 2). */
 export const READ_ONLY_TOOLS: ToolDef[] = [readFile, listDir, grep];
 
+/** Mutating tools (Phase 3) — same sandbox; writes are auto-applied (YOLO). */
+export const MUTATING_TOOLS: ToolDef[] = [writeFile, editFile, mkdir];
+
+/** Every tool the OpenAI backend can execute. */
+export const ALL_TOOLS: ToolDef[] = [...READ_ONLY_TOOLS, ...MUTATING_TOOLS];
+
 /** Map tool name → definition for execution. */
-export const TOOL_MAP: Map<string, ToolDef> = new Map(READ_ONLY_TOOLS.map((t) => [t.name, t]));
+export const TOOL_MAP: Map<string, ToolDef> = new Map(ALL_TOOLS.map((t) => [t.name, t]));
 
 /** Function-tool schemas in the Responses API shape (flat `{type:"function", name, …}`). */
-export function toolSchemas(tools: ToolDef[] = READ_ONLY_TOOLS): Record<string, unknown>[] {
+export function toolSchemas(tools: ToolDef[] = ALL_TOOLS): Record<string, unknown>[] {
 	return tools.map((t) => ({
 		type: "function",
 		name: t.name,

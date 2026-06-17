@@ -106,10 +106,14 @@ a live key — needs the user's `openaiApiKey`.
 
 Not yet: tests for `resolveInVault`; parallel tool calls run sequentially.
 
-### Phase 3 — Mutating tools (YOLO, sandboxed) ⬜ TODO
+### Phase 3 — Mutating tools (YOLO, sandboxed) ✅ DONE
 
-- [ ] `write_file`, `edit_file` (string-replace), `mkdir` — all via the sandbox.
-- [ ] Can run the ingest workflow end-to-end (create/update wiki pages).
+- [x] `write_file` (create/overwrite, makes parent dirs), `edit_file`
+      (unique-or-`replace_all` string replace), `mkdir` — all via `resolveInVault`.
+- [x] `MUTATING_TOOLS` + `ALL_TOOLS`; `TOOL_MAP`/`toolSchemas()` now cover both
+      sets, so the backend executes writes with no further changes. Obsidian's file
+      watcher reconciles the direct fs writes (same as pi/Claude).
+- [x] Can run the ingest workflow end-to-end (create/update wiki pages). Deployed.
 
 ### Phase 4 — Commit step ⬜ TODO
 
@@ -190,6 +194,10 @@ Two ways to authenticate (settings → OpenAI → Authentication):
   replay, 401→refresh). Settings: auth-mode dropdown + "Sign in with ChatGPT"
   button; plugin `loginOpenAi`/`logoutOpenAi`/`refreshOpenAiToken`. Build green,
   deployed. **Untested against a live ChatGPT login.**
+- **Phase 3 done** — mutating tools `write_file`/`edit_file`/`mkdir` added to
+  `src/openai-tools.ts` (same `resolveInVault` sandbox). `TOOL_MAP`/`toolSchemas`
+  switched to `ALL_TOOLS`, so the agent loop now creates/edits vault pages — the
+  ingest workflow can run end-to-end on the OpenAI engine. Deployed.
 - **Phase 2 done** — read-only tool loop. `src/openai-tools.ts` adds the
   `resolveInVault` sandbox + `read_file`/`list_dir`/`grep`. `OpenAiBackend` now
   runs the agent loop (`runTurn` → execute calls → feed `function_call_output`
