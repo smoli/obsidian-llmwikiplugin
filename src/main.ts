@@ -25,8 +25,19 @@ export interface Persona {
 	 * offered in the "Ask … about selection/page" context menu.
 	 */
 	wholeVault?: boolean;
+	/** Skill names (→ `skills/<name>.md`) injected into this persona's system prompt. */
+	skills: string[];
+	/** Whether the core AGENTS.md is prepended (default true; `baseAgents: false` opts out). */
+	baseAgents: boolean;
 	/** One-click prompts declared in the persona's frontmatter. */
 	prompts: QuickPrompt[];
+}
+
+/** Parse a frontmatter `skills:` value (a YAML list, or a comma-separated string). */
+function parseSkillList(raw: unknown): string[] {
+	if (Array.isArray(raw)) return raw.map((s) => String(s).trim().replace(/\.md$/i, "")).filter(Boolean);
+	if (typeof raw === "string") return raw.split(",").map((s) => s.trim().replace(/\.md$/i, "")).filter(Boolean);
+	return [];
 }
 
 /** Remove a leading YAML frontmatter block (`---` … `---`) from markdown. */
@@ -491,8 +502,11 @@ export default class LlmAgentPlugin extends Plugin {
 				const responseSchema = schema === true || schema === "true";
 				const vault = fm.wholeVault ?? fm.whole_vault ?? fm.vaultOnly;
 				const wholeVault = vault === true || vault === "true";
+				const skills = parseSkillList(fm.skills);
+				const baseRaw = fm.baseAgents ?? fm.base_agents ?? fm.includeAgents;
+				const baseAgents = !(baseRaw === false || baseRaw === "false");
 				const prompts = parseQuickPrompts(fm.prompts);
-				out.push({ path: f.path, name, responseSchema, wholeVault, prompts });
+				out.push({ path: f.path, name, responseSchema, wholeVault, skills, baseAgents, prompts });
 			}
 		}
 		out.sort((a, b) => a.name.localeCompare(b.name));
@@ -525,31 +539,79 @@ export default class LlmAgentPlugin extends Plugin {
 	}
 
 	/**
-	 * Resolve a persona (by vault-relative path) to a temp file holding its content
-	 * with frontmatter stripped, suitable to pass as a system prompt. Returns null
-	 * when the path is empty/invalid — callers then fall back to AGENTS.md. When the
-	 * persona opts into a response schema, the structured-output protocol is appended.
+	 * Assemble the full system prompt for a session into a single temp file, in
+	 * order: core AGENTS.md + the selected persona's body + its declared skills +
+	 * the fixed instructions (and the response-schema protocol if the persona opts
+	 * in). Personas *augment* the core rather than replacing it; a persona can set
+	 * `baseAgents: false` to drop the core. Used by all three engines (Claude only
+	 * honors one append file, so everything is combined here). Returns null when
+	 * there is nothing to write.
 	 */
-	resolvePersonaPromptFile(personaPath: string): string | null {
-		if (!personaPath) return null;
-		const base = this.getVaultBase();
-		if (!base) return null;
-		const abs = path.join(base, personaPath);
+	assembleSystemPromptFile(personaPath: string): string | null {
+		const persona = this.getPersonaByPath(personaPath);
+		const parts: string[] = [];
+
+		// 1. Core AGENTS.md (unless the persona opts out).
+		if (!persona || persona.baseAgents) {
+			const core = this.readStripped(this.getAgentsFile());
+			if (core) parts.push(core);
+		}
+
+		// 2. Persona body.
+		if (personaPath) {
+			const base = this.getVaultBase();
+			const body = base ? this.readStripped(path.join(base, personaPath)) : "";
+			if (body) parts.push(body);
+		}
+
+		// 3. Declared skills, each tagged so the model (and debug log) sees its source.
+		for (const file of this.resolveSkillFiles(persona?.skills ?? [])) {
+			const text = this.readStripped(file);
+			if (text) parts.push(`<!-- skill: ${path.basename(file)} -->\n${text}`);
+		}
+
+		// 4. Fixed instructions + optional structured-response protocol.
+		parts.push(WIKI_LINE_LINK_INSTRUCTION);
+		if (persona?.responseSchema) parts.push(RESPONSE_SCHEMA_INSTRUCTION.trim());
+
+		const content = parts.join("\n\n---\n\n").trim();
+		if (!content) return null;
 		try {
-			if (!fs.existsSync(abs)) return null;
-			let content = stripFrontmatter(fs.readFileSync(abs, "utf8"));
-			if (!content) return null;
-			if (this.getPersonaByPath(personaPath)?.responseSchema) content += RESPONSE_SCHEMA_INSTRUCTION;
-			// A persona is always the single prompt file Claude/pi use, so bake the
-			// fixed instructions in here rather than passing a second append file.
-			content += "\n\n" + WIKI_LINE_LINK_INSTRUCTION;
-			const slug = personaPath.replace(/[^a-zA-Z0-9]+/g, "-");
-			const tmp = path.join(os.tmpdir(), `llm-agent-persona-${slug}.md`);
+			const slug = personaPath ? personaPath.replace(/[^a-zA-Z0-9]+/g, "-") : "default";
+			const tmp = path.join(os.tmpdir(), `llm-agent-sys-${slug}.md`);
 			fs.writeFileSync(tmp, content + "\n", "utf8");
 			return tmp;
 		} catch {
 			return null;
 		}
+	}
+
+	/** Read a file and strip its YAML frontmatter; "" on any error or missing file. */
+	private readStripped(file: string | null): string {
+		if (!file) return "";
+		try {
+			return stripFrontmatter(fs.readFileSync(file, "utf8"));
+		} catch {
+			return "";
+		}
+	}
+
+	/**
+	 * Resolve declared skill names to existing `<skillsFolder>/<name>.md` absolute
+	 * paths under the working dir. Missing skills are flagged (a typo shouldn't
+	 * silently drop instructions) but don't abort the rest.
+	 */
+	resolveSkillFiles(names: string[]): string[] {
+		const base = this.getWorkingDir();
+		if (!base || names.length === 0) return [];
+		const folder = (this.settings.skillsFolder || "skills").trim().replace(/^[\\/]+|[\\/]+$/g, "");
+		const files: string[] = [];
+		for (const name of names) {
+			const abs = path.join(base, folder, `${name}.md`);
+			if (fs.existsSync(abs)) files.push(abs);
+			else new Notice(`Skill nicht gefunden: ${folder}/${name}.md`);
+		}
+		return files;
 	}
 
 	/** Tell every open STS-LLM Wiki panel to rebuild its persona dropdown + prompts. */
@@ -584,45 +646,6 @@ export default class LlmAgentPlugin extends Plugin {
 		const p = path.join(cwd, "AGENTS.md");
 		try {
 			return fs.existsSync(p) ? p : null;
-		} catch {
-			return null;
-		}
-	}
-
-	/**
-	 * AGENTS.md as a system-prompt file with its frontmatter stripped, written to
-	 * a temp file. Used as Claude's system prompt so the `prompts:` frontmatter
-	 * isn't fed to the model. Returns null if there's no AGENTS.md (or no body
-	 * once frontmatter is removed). pi can't use this — it reads AGENTS.md itself.
-	 */
-	resolveAgentsPromptFile(personaActive: boolean): string | null {
-		const src = this.getAgentsFile();
-		if (!src) return null;
-		try {
-			let content = stripFrontmatter(fs.readFileSync(src, "utf8"));
-			if (!content) return null;
-			// Bake in the fixed instructions only when no persona is active — with a
-			// persona, the persona file already carries them (avoids duplicate text
-			// for pi, which appends both AGENTS.md and the persona).
-			if (!personaActive) content += "\n\n" + WIKI_LINE_LINK_INSTRUCTION;
-			const tmp = path.join(os.tmpdir(), "llm-agent-agents.md");
-			fs.writeFileSync(tmp, content + "\n", "utf8");
-			return tmp;
-		} catch {
-			return null;
-		}
-	}
-
-	/**
-	 * Temp file holding the fixed instructions appended to every session's system
-	 * prompt (currently the `path:line` linking convention). Returns null on a
-	 * write error so callers simply skip it.
-	 */
-	resolveFixedInstructionFile(): string | null {
-		try {
-			const tmp = path.join(os.tmpdir(), "llm-agent-instructions.md");
-			fs.writeFileSync(tmp, WIKI_LINE_LINK_INSTRUCTION + "\n", "utf8");
-			return tmp;
 		} catch {
 			return null;
 		}

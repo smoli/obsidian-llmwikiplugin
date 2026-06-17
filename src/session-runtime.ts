@@ -107,10 +107,10 @@ export class SessionRuntime {
 		const engine = this.session.engine;
 		const personaPath = this.session.persona;
 
-		// The persona / AGENTS.md prompt file already has the fixed instructions
-		// (path:line linking, schema protocol) baked in — Claude only honors a
-		// single append file, so we never pass a second one.
-		const personaFile = this.plugin.resolvePersonaPromptFile(personaPath);
+		// One assembled system prompt for every engine: core AGENTS.md + persona +
+		// declared skills + fixed instructions (Claude only honors a single append
+		// file, so everything is combined into one).
+		const systemFile = this.plugin.assembleSystemPromptFile(personaPath) ?? undefined;
 		this.structuredResponse = this.plugin.getPersonaByPath(personaPath)?.responseSchema === true;
 		const resumeSessionId = this.session.engineSessionId;
 
@@ -120,19 +120,14 @@ export class SessionRuntime {
 				cwd,
 				model: s.claudeModel || "default",
 				permissionMode: s.claudePermissionMode,
-				agentsFile:
-					personaFile ??
-					this.plugin.resolveAgentsPromptFile(!!personaPath) ??
-					this.plugin.resolveFixedInstructionFile() ??
-					undefined,
+				agentsFile: systemFile,
 				agentsMode: s.claudeAgentsMode,
 				resumeSessionId,
 			});
 		} else if (engine === "openai") {
-			// OpenAI direct backend. The persona/AGENTS.md prompt becomes the system
+			// OpenAI direct backend. The assembled prompt becomes the system
 			// `instructions`; subscription mode (no server-side state) is seeded with
 			// the prior turns so the conversation continues across restarts.
-			const systemPromptFile = personaFile ?? this.plugin.resolveAgentsPromptFile(false) ?? undefined;
 			const auth =
 				s.openaiAuthMode === "subscription" && this.plugin.settings.openaiOAuth
 					? {
@@ -146,13 +141,13 @@ export class SessionRuntime {
 				auth,
 				model: s.openaiModel,
 				cwd,
-				systemPromptFile,
+				systemPromptFile: systemFile,
 				resumeSessionId,
 				history: this.session.transcript.map((m) => ({ role: m.role, text: m.text })),
 			});
 		} else {
-			// Disable pi's raw AGENTS.md auto-load and re-inject the frontmatter-stripped
-			// version (plus the persona, if any) so pi never sees the prompts frontmatter.
+			// Disable pi's raw AGENTS.md auto-load and inject the single assembled
+			// system prompt instead (so pi never sees the prompts frontmatter).
 			this.backend = new PiBackend({
 				piPath: s.piPath,
 				cwd,
@@ -161,9 +156,7 @@ export class SessionRuntime {
 				thinking: s.thinking,
 				persistSession: s.persistSession,
 				disableContextFiles: true,
-				appendSystemPromptFiles: [this.plugin.resolveAgentsPromptFile(!!personaPath), personaFile].filter(
-					(f): f is string => !!f
-				),
+				appendSystemPromptFiles: systemFile ? [systemFile] : [],
 				resumeSessionId,
 			});
 		}

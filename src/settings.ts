@@ -78,6 +78,9 @@ export interface LlmAgentSettings {
 
 	/** Vault-relative folder where saved chats are written. */
 	chatSaveFolder: string;
+
+	/** Vault-relative folder holding skill files (`<name>.md`) personas can include. */
+	skillsFolder: string;
 }
 
 export const DEFAULT_SETTINGS: LlmAgentSettings = {
@@ -106,6 +109,7 @@ export const DEFAULT_SETTINGS: LlmAgentSettings = {
 	gitSuggestCommitMessage: true,
 	selectedPersona: "",
 	chatSaveFolder: "Chats",
+	skillsFolder: "skills",
 	autoRunEnabled: false,
 	autoRunFolder: "99-raw",
 	autoRunPrompt:
@@ -450,6 +454,24 @@ export class LlmAgentSettingTab extends PluginSettingTab {
 					.setValue(this.plugin.settings.chatSaveFolder)
 					.onChange(async (v) => {
 						this.plugin.settings.chatSaveFolder = v.trim().replace(/^[\\/]+|[\\/]+$/g, "");
+						await this.plugin.saveSettings();
+					})
+			);
+
+		// ----- skills -----
+		containerEl.createEl("h3", { text: "Skills" });
+
+		new Setting(containerEl)
+			.setName("Skills folder")
+			.setDesc(
+				"Vault-relative folder holding skill files. A persona's frontmatter `skills: [name]` includes `<folder>/<name>.md` in its system prompt, so shared workflow instructions can live outside AGENTS.md and load only when needed."
+			)
+			.addText((t) =>
+				t
+					.setPlaceholder("skills")
+					.setValue(this.plugin.settings.skillsFolder)
+					.onChange(async (v) => {
+						this.plugin.settings.skillsFolder = v.trim().replace(/^[\\/]+|[\\/]+$/g, "");
 						await this.plugin.saveSettings();
 					})
 			);
