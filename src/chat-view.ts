@@ -13,7 +13,7 @@ import {
 import { runCapture, runGit } from "./git";
 import type LlmAgentPlugin from "./main";
 import { AgentBackend, BackendEvent, BackendModel, NormalizedStats, PermissionRequest } from "./backend";
-import { SessionRuntime } from "./session-runtime";
+import { SessionRuntime, DebugLogEntry } from "./session-runtime";
 import { ResponseEnvelope, parseResponseEnvelopes } from "./response-format";
 import { ExtensionUIRequest, ThinkingLevel } from "./rpc-types";
 import { SavedSession, SessionMessage, newSessionId } from "./sessions";
@@ -199,6 +199,10 @@ export class LlmChatView extends ItemView {
 		const saveBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "Save chat as Markdown" } });
 		setIcon(saveBtn, "save");
 		this.registerDomEvent(saveBtn, "click", () => this.saveChat());
+
+		const debugBtn = header.createEl("button", { cls: "llm-icon-btn", attr: { "aria-label": "Export debug log (tool calls + payloads)" } });
+		setIcon(debugBtn, "bug");
+		this.registerDomEvent(debugBtn, "click", () => this.exportDebugLog());
 
 		this.stopBtn = header.createEl("button", { cls: "llm-icon-btn llm-stop-btn", attr: { "aria-label": "Stop" } });
 		setIcon(this.stopBtn, "square");
@@ -389,6 +393,155 @@ export class LlmChatView extends ItemView {
 			} else {
 				parts.push("", m.role === "user" ? "## You" : "## Assistant", "", text);
 				lastRole = m.role;
+			}
+		}
+		return parts.join("\n").trim() + "\n";
+	}
+
+	// --------------------------------------------------- debug log export
+
+	/**
+	 * Export the full debug log of the active session — metadata plus a faithful,
+	 * chronological record of prompts, thinking, tool calls *with complete
+	 * payloads*, and per-run token stats — so you can see exactly what the model
+	 * did and where the tokens went. The log lives on the live runtime, so this
+	 * works while the session is warm (not after a restart/eviction).
+	 */
+	private async exportDebugLog(): Promise<void> {
+		const runtime = this.runtime;
+		if (!runtime || runtime.debugLog.length === 0) {
+			new Notice("No activity logged yet — send a prompt first.");
+			return;
+		}
+
+		const folder = (this.plugin.settings.chatSaveFolder || "").trim().replace(/^[\\/]+|[\\/]+$/g, "");
+		if (folder && !this.app.vault.getAbstractFileByPath(folder)) {
+			try {
+				await this.app.vault.createFolder(folder);
+			} catch {
+				/* may already exist due to a race; ignore */
+			}
+		}
+
+		const content = this.buildDebugMarkdown(runtime.debugLog);
+
+		const now = new Date();
+		const pad = (n: number) => String(n).padStart(2, "0");
+		const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`;
+		const base = `${stamp} ${this.fileSlug(this.session.name || "Chat")} debug`;
+		const dir = folder ? folder + "/" : "";
+		let name = `${base}.md`;
+		for (let i = 1; this.app.vault.getAbstractFileByPath(normalizePath(dir + name)); i++) {
+			name = `${base} (${i}).md`;
+		}
+
+		try {
+			const file = await this.app.vault.create(normalizePath(dir + name), content);
+			new Notice(`Debug-Log exportiert: ${file.path}`);
+			void this.app.workspace.getLeaf(true).openFile(file);
+		} catch (err) {
+			new Notice(`Export fehlgeschlagen: ${errorMessage(err)}`);
+		}
+	}
+
+	/** Render the debug log as Markdown with a metadata + token-burn summary header. */
+	private buildDebugMarkdown(log: DebugLogEntry[]): string {
+		const fence = (content: string, lang = ""): string => {
+			const runs: string[] = content.match(/`+/g) ?? [];
+			const longest = runs.reduce((m, s) => Math.max(m, s.length), 0);
+			const ticks = "`".repeat(Math.max(3, longest + 1));
+			return `${ticks}${lang}\n${content}\n${ticks}`;
+		};
+		const time = (t: number) => {
+			const d = new Date(t);
+			const pad = (n: number) => String(n).padStart(2, "0");
+			return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+		};
+
+		const model = this.modelSelect.selectedOptions[0]?.text || this.modelSelect.value || "(unknown)";
+		const persona = (this.personaSelect.selectedOptions[0]?.text || "Default (AGENTS.md)").replace(/^🎭\s*/, "");
+
+		const toolCalls = log.filter((e): e is Extract<DebugLogEntry, { kind: "tool" }> => e.kind === "tool");
+		const runs = log.filter((e) => e.kind === "run-start").length;
+		const tokenStats = log.filter((e): e is Extract<DebugLogEntry, { kind: "stats" }> => e.kind === "stats");
+		const tokenSum = tokenStats.reduce((s, e) => s + (e.tokensTotal ?? 0), 0);
+		const peakTokens = tokenStats.reduce((m, e) => Math.max(m, e.tokensTotal ?? 0), 0);
+		const resultChars = toolCalls.reduce((s, e) => s + (e.result?.length ?? 0), 0);
+		const largest = toolCalls.reduce(
+			(m, e) => ((e.result?.length ?? 0) > m.len ? { len: e.result?.length ?? 0, name: e.name } : m),
+			{ len: 0, name: "" }
+		);
+
+		const head = [
+			`# Debug export — ${this.session.name || "Chat"}`,
+			"",
+			"## Metadata",
+			`- engine: \`${this.plugin.settings.engine}\``,
+			`- model: \`${model}\``,
+			`- persona: ${persona}`,
+			`- session id: \`${this.session.id}\``,
+			`- engine session id: \`${this.session.engineSessionId ?? "(none)"}\``,
+			`- exported: ${new Date().toLocaleString()}`,
+			"",
+			"## Token / tool summary",
+			`- runs (prompt round-trips): **${runs}**`,
+			`- tool calls: **${toolCalls.length}**`,
+			`- summed run tokens (Σ per-run totals — a proxy for total burn): **${tokenSum.toLocaleString()}**`,
+			`- peak single-run tokens: **${peakTokens.toLocaleString()}**`,
+			`- total tool-result chars fed back: **${resultChars.toLocaleString()}**`,
+			largest.len ? `- largest tool result: **${largest.len.toLocaleString()} chars** (\`${largest.name}\`)` : "",
+			"",
+			"> In subscription mode the full item history (incl. every tool result) is re-sent each round-trip, so per-run tokens grow with every tool call — watch how `summed run tokens` climbs.",
+			"",
+			"---",
+			"",
+		]
+			.filter((l) => l !== "")
+			.join("\n");
+
+		const parts: string[] = [head];
+		let run = 0;
+		for (const e of log) {
+			switch (e.kind) {
+				case "run-start":
+					run++;
+					parts.push(`\n## ▶ Run ${run}  ·  ${time(e.t)}`);
+					break;
+				case "run-end":
+					parts.push(`\n_— end run ${run} —_`);
+					break;
+				case "user":
+					parts.push(`\n### 🧑 You`, "", e.text.trim());
+					break;
+				case "assistant":
+					parts.push(`\n### 🤖 Assistant`, "", e.text.trim());
+					break;
+				case "thinking":
+					parts.push(`\n### 🤔 Thinking`, "", fence(e.text.trim()));
+					break;
+				case "tool": {
+					const status = e.isError ? "❌ ERROR" : "✓";
+					const args = (() => {
+						try {
+							return JSON.stringify(e.args ?? {}, null, 2);
+						} catch {
+							return String(e.args);
+						}
+					})();
+					const chars = e.result?.length ?? 0;
+					parts.push(
+						`\n### 🔧 ${e.name}  ${status}  ·  ${time(e.t)}`,
+						"",
+						"**args:**",
+						fence(args, "json"),
+						`**result** (${chars.toLocaleString()} chars):`,
+						fence(e.result ?? "(no result captured)")
+					);
+					break;
+				}
+				case "stats":
+					parts.push(`\n_run tokens: ${(e.tokensTotal ?? 0).toLocaleString()}${e.cost != null ? ` · cost: ${e.cost}` : ""}_`);
+					break;
 			}
 		}
 		return parts.join("\n").trim() + "\n";

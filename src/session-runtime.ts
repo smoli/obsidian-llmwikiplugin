@@ -11,6 +11,21 @@ function errorMessage(err: unknown): string {
 	return err instanceof Error ? err.message : String(err);
 }
 
+/**
+ * One entry in a session's debug event log — a faithful, chronological record of
+ * everything the engine did (prompts, thinking, tool calls *with full payloads*,
+ * per-run token stats). Used by the "Export debug log" feature to see exactly what
+ * the model is doing and where tokens go. Kept in memory on the live runtime.
+ */
+export type DebugLogEntry =
+	| { kind: "run-start"; t: number }
+	| { kind: "run-end"; t: number }
+	| { kind: "user"; t: number; text: string }
+	| { kind: "assistant"; t: number; text: string }
+	| { kind: "thinking"; t: number; text: string }
+	| { kind: "tool"; t: number; id: string; name: string; args: unknown; result?: string; isError?: boolean }
+	| { kind: "stats"; t: number; tokensTotal?: number; cost?: number };
+
 /** Callbacks the rendering view registers while it is attached to a runtime. */
 export interface RuntimeHandlers {
 	onEvent(ev: BackendEvent): void;
@@ -39,6 +54,13 @@ export class SessionRuntime {
 	/** Assistant text accumulated for the current streamed segment (model side). */
 	private buf = "";
 	private viewHandlers: RuntimeHandlers | null = null;
+
+	/** In-memory debug log (tool calls with payloads, stats, …) for export. */
+	readonly debugLog: DebugLogEntry[] = [];
+	/** Thinking deltas accumulated for the current run, flushed before assistant text. */
+	private thinkBuf = "";
+	/** tool-call id → its log entry, so tool-end can fill in the result. */
+	private toolEntries = new Map<string, Extract<DebugLogEntry, { kind: "tool" }>>();
 
 	constructor(readonly session: SavedSession, private plugin: LlmAgentPlugin) {
 		this.lastUsed = Date.now();
@@ -175,6 +197,7 @@ export class SessionRuntime {
 		if (!this.backend?.running) return { ok: false, error: "The agent is not running." };
 		this.lastUsed = Date.now();
 		this.session.transcript.push({ role: "user", text });
+		this.debugLog.push({ kind: "user", t: Date.now(), text });
 		this.afterTranscriptChange();
 		return this.backend.prompt(text, steering);
 	}
@@ -188,10 +211,12 @@ export class SessionRuntime {
 	// ----------------------------------------------------- headless processing
 
 	private onBackendEvent(ev: BackendEvent): void {
+		const t = Date.now();
 		switch (ev.type) {
 			case "run-start":
 				this.streaming = true;
 				this.buf = "";
+				this.debugLog.push({ kind: "run-start", t });
 				break;
 			case "text-start":
 				this.buf = "";
@@ -201,11 +226,47 @@ export class SessionRuntime {
 				break;
 			case "text-end":
 				if (typeof ev.content === "string") this.buf = ev.content;
+				this.flushThinking(t);
 				this.finalizeAssistant();
+				break;
+			case "thinking-delta":
+				this.thinkBuf += ev.delta;
+				break;
+			case "tool-start": {
+				const entry: Extract<DebugLogEntry, { kind: "tool" }> = {
+					kind: "tool",
+					t,
+					id: ev.id,
+					name: ev.name,
+					args: ev.args,
+				};
+				this.toolEntries.set(ev.id, entry);
+				this.debugLog.push(entry);
+				break;
+			}
+			case "tool-update": {
+				const entry = this.toolEntries.get(ev.id);
+				if (entry) entry.result = (entry.result ?? "") + ev.text;
+				break;
+			}
+			case "tool-end": {
+				const entry = this.toolEntries.get(ev.id);
+				if (entry) {
+					entry.result = ev.text;
+					entry.isError = ev.isError;
+				} else {
+					this.debugLog.push({ kind: "tool", t, id: ev.id, name: "(unknown)", args: undefined, result: ev.text, isError: ev.isError });
+				}
+				break;
+			}
+			case "stats":
+				this.debugLog.push({ kind: "stats", t, tokensTotal: ev.stats.tokensTotal, cost: ev.stats.cost });
 				break;
 			case "run-end":
 				this.streaming = false;
+				this.flushThinking(t);
 				this.finalizeAssistant();
+				this.debugLog.push({ kind: "run-end", t });
 				void this.captureSessionId();
 				if (!this.attached) {
 					this.session.unseen = true;
@@ -215,15 +276,23 @@ export class SessionRuntime {
 				break;
 			case "error":
 				this.streaming = false;
+				this.debugLog.push({ kind: "assistant", t, text: `[error] ${ev.message}` });
 				break;
 		}
 		this.viewHandlers?.onEvent(ev);
+	}
+
+	/** Emit any buffered thinking as a log entry (before assistant text / at run end). */
+	private flushThinking(t: number): void {
+		if (this.thinkBuf.trim()) this.debugLog.push({ kind: "thinking", t, text: this.thinkBuf });
+		this.thinkBuf = "";
 	}
 
 	private finalizeAssistant(): void {
 		const text = this.buf;
 		this.buf = "";
 		if (!text.trim()) return;
+		this.debugLog.push({ kind: "assistant", t: Date.now(), text });
 		const envs = this.structuredResponse ? parseResponseEnvelopes(text) : [];
 		if (envs.length) {
 			// Keep the envelopes so chips/checkboxes re-render on session restore.
